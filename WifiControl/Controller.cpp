@@ -243,6 +243,7 @@ namespace WPASupplicant {
                     Reevaluate();
                     _adminLock.Unlock();
                     TRACE(Trace::Information, ("Scan completed added=%d remove=%d in %lf sec", _added, _removed, ((double_t)elapsed)/1000000) );
+                    Notify(CTRL_EVENT_SCAN_RESULTS);
                 } else if ((event == CTRL_EVENT_BSS_ADDED) || (event == CTRL_EVENT_BSS_REMOVED)) {
 
                     ASSERT(position != string::npos);

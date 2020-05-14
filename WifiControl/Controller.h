@@ -801,7 +801,6 @@ namespace WPASupplicant {
             uint32_t result = Core::ERROR_INPROGRESS;
 
             if (!_scanning) {
-                _scanning = true;
                 result = Core::ERROR_NONE;
 
                 CustomRequest exchange(string(_TXT("SCAN")));
@@ -810,6 +809,8 @@ namespace WPASupplicant {
 
                 if ((exchange.Wait(MaxConnectionTime) == false) || (exchange.Response() != _T("OK"))) {
                     result = Core::ERROR_UNAVAILABLE;
+                } else {
+                    _scanning = true;
                 }
 
                 Revoke(&exchange);
