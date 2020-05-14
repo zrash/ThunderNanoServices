@@ -137,6 +137,200 @@ namespace Plugin {
             uint32_t _pid;
         };
 
+        class WifiConnector
+        {
+        private:
+            using Job = Core::WorkerPool::JobType<WifiConnector&>;
+            using SsidList = std::list <std::pair<int32_t, const string> >;
+
+            enum states
+            {
+                IDLE,
+                SCANNING,
+                PROCESSING,
+                CONNECTING,
+                RECONNECTING,
+                AUTHENTICATION,
+            };
+
+        public:
+            WifiConnector() = delete;
+            WifiConnector(const WifiConnector&) = delete;
+            WifiConnector& operator=(const WifiConnector&) = delete;
+
+            WifiConnector(WifiControl* parent, const uint8_t scheduleInterval)
+                : _adminLock()
+                , _parent(*parent)
+                , _job(*this)
+                , _state(IDLE)
+                , _prevState(IDLE)
+                , _ssidList()
+                , _schedInterval(scheduleInterval * 1000)
+                , _exchange(string(_TXT("")))
+                , _bssid(0)
+            {
+                ASSERT(parent != nullptr);
+            }
+            ~WifiConnector()
+            {
+            }
+            void Dispatch()
+            {
+                uint32_t scheduleTime = ~0;
+
+                _adminLock.Lock();
+
+                if (_state == SCANNING) {
+
+                    _parent._controller->Scan();
+                    scheduleTime = _schedInterval;
+
+                } else if (_state == PROCESSING) {
+
+                    /* Arrange SSIDs in sorted order as per signal strength */
+                    WPASupplicant::Network::Iterator list(
+                            _parent._controller->Networks());
+                    while (list.Next() == true) {
+                        const WPASupplicant::Network& net = list.Current();
+                        if (_parent._controller->Get(net.SSID()).IsValid()) {
+
+                            int32_t strength(net.Signal());
+                            if (net.SSID().compare(_parent.PreferredSSID()) == 0) {
+                                strength = Core::NumberType<int32_t>::Max();
+                            }
+                            auto index(_ssidList.begin());
+                            while ((index != _ssidList.end())
+                                    && (index->first > strength)) {
+                                index++;
+                            }
+                            _ssidList.emplace(index,
+                                    std::pair<int32_t, string>(strength,
+                                            net.SSID()));
+                        }
+                    }
+                    _state = _prevState = CONNECTING;
+                }
+                if (_state >= CONNECTING) {
+
+                    if (_prevState != _state) {
+                        _prevState = _state;
+                    } else {
+                        // Move to next SSID
+                        _state = CONNECTING;
+                    }
+                    if (_state == CONNECTING) {
+
+                        if (_ssidList.empty() == false) {
+
+                            _parent._controller->SelectNetwork(_exchange,
+                                    _ssidList.front().second, _bssid);
+                            _ssidList.pop_front();
+                        } else {
+                            TRACE(Trace::Warning, (_T("Tried all opportunities, retrying again")));
+                            _state = SCANNING;
+                        }
+                    } else if (_state == RECONNECTING) {
+
+                        _parent._controller->Reconnect(_exchange);
+                    } else if (_state == AUTHENTICATION) {
+
+                        _parent._controller->Authenticate(_exchange, _bssid);
+                    }
+
+                    scheduleTime = _schedInterval;
+                }
+                _adminLock.Unlock();
+
+                if (scheduleTime != static_cast<uint32_t>(~0)) {
+                    _job.Schedule(Core::Time::Now().Add(scheduleTime));
+                }
+            }
+            void Scanned()
+            {
+                _adminLock.Lock();
+                if (_state == SCANNING) {
+                    _state = PROCESSING;
+                    _adminLock.Unlock();
+
+                    _job.Revoke();
+                    _job.Submit();
+                } else {
+                    _adminLock.Unlock();
+                }
+            }
+            void Connect()
+            {
+                if (_parent.PreferredSSID().empty() == false)
+                {
+                    _adminLock.Lock();
+                    _state = SCANNING;
+                    _adminLock.Unlock();
+
+                    _job.Revoke();
+                    _job.Submit();
+                }
+            }
+            void Reset()
+            {
+                _adminLock.Lock();
+                _state = IDLE;
+                _adminLock.Unlock();
+
+                _job.Revoke();
+                _ssidList.clear();
+            }
+            void Disconnected()
+            {
+                _adminLock.Lock();
+                if (_state >= CONNECTING) {
+                    _adminLock.Unlock();
+
+                    _job.Revoke();
+                    _job.Submit();
+                } else {
+                    _adminLock.Unlock();
+                    Reset();
+                    Connect();
+                }
+            }
+            void OKReceived()
+            {
+                bool stateChanged = true;
+
+                _adminLock.Lock();
+
+                if (_state == CONNECTING) {
+                    if (_bssid != 0) {
+                        _state = RECONNECTING;
+                    } else {
+                        stateChanged = false;
+                    }
+                } else if (_state == RECONNECTING) {
+                    _state = AUTHENTICATION;
+                } else if (_state == AUTHENTICATION) {
+                    stateChanged = false;
+                }
+
+                _adminLock.Unlock();
+
+                if (stateChanged == true) {
+                    _job.Revoke();
+                    _job.Submit();
+                }
+            }
+
+        private:
+            Core::CriticalSection _adminLock;
+            WifiControl& _parent;
+            Job _job;
+            states _state;
+            states _prevState;
+            SsidList _ssidList;
+            uint32_t _schedInterval;
+            WPASupplicant::Controller::CustomRequest _exchange;
+            uint64_t _bssid;
+        };
+
     public:
         class Config : public Core::JSON::Container {
         private:
@@ -145,17 +339,20 @@ namespace Plugin {
 
         public:
             Config()
-                : Connector(_T("/var/run/wpa_supplicant"))
+                : Core::JSON::Container()
+                , Connector(_T("/var/run/wpa_supplicant"))
                 , Interface(_T("wlan0"))
                 , Application(_T("/usr/sbin/wpa_supplicant"))
                 , BssExpirationAge(_T("180"))
                 , ScanInterval(120)
+                , AutoConnect(false)
             {
                 Add(_T("connector"), &Connector);
                 Add(_T("interface"), &Interface);
                 Add(_T("application"), &Application);
                 Add(_T("bssexpiration"), &BssExpirationAge);
                 Add(_T("scanInterval"), &ScanInterval);
+                Add(_T("autoconnect"), &AutoConnect);
             }
             virtual ~Config()
             {
@@ -167,6 +364,7 @@ namespace Plugin {
             Core::JSON::String Application;
             Core::JSON::String BssExpirationAge;
             Core::JSON::DecUInt32 ScanInterval;
+            Core::JSON::Boolean AutoConnect;
         };
 
         static void FillNetworkInfo(const WPASupplicant::Network& info, JsonData::WifiControl::NetworkInfo& net)
@@ -331,6 +529,33 @@ namespace Plugin {
         {
             UnregisterAll();
         }
+        const string& PreferredSSID() const
+        {
+            return (_preferredSsid);
+        }
+        uint32_t Connect(const std::string& ssid)
+        {
+            if (ssid.compare(_controller->Current()) != 0) {
+
+                _preferredSsid.assign(ssid);
+                if (_controller->Current().empty() == true) {
+                    _wifiConnector.Connect();
+                } else {
+                    _controller->Disconnect(_controller->Current());
+                }
+            }
+            return Core::ERROR_NONE;
+        }
+        uint32_t Disconnect(const std::string& ssid)
+        {
+            uint32_t result = Core::ERROR_UNKNOWN_KEY;
+            if (ssid.compare(_controller->Current()) == 0) {
+
+                _preferredSsid.clear();
+                result = _controller->Disconnect(_controller->Current());
+            }
+            return result;
+        }
 
         BEGIN_INTERFACE_MAP(WifiControl)
         INTERFACE_ENTRY(PluginHost::IPlugin)
@@ -365,6 +590,9 @@ namespace Plugin {
         Sink _sink;
         WifiDriver _wpaSupplicant;
         Core::ProxyType<WPASupplicant::Controller> _controller;
+        WifiConnector _wifiConnector;
+        bool _autoConnect;
+        std::string _preferredSsid;
         void RegisterAll();
         void UnregisterAll();
         uint32_t endpoint_delete(const JsonData::WifiControl::DeleteParamsInfo& params);

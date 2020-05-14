@@ -52,7 +52,8 @@ namespace WPASupplicant {
             CTRL_EVENT_NETWORK_NOT_FOUND,
             CTRL_EVENT_NETWORK_CHANGED,
             WPS_AP_AVAILABLE,
-            AP_ENABLED
+            AP_ENABLED,
+            CTRL_EVENT_OK,
         };
 
     private:
@@ -605,6 +606,8 @@ namespace WPASupplicant {
         private:
             Controller& _parent;
         };
+
+    public:
         class CustomRequest : public Request {
         private:
             CustomRequest() = delete;
@@ -614,6 +617,7 @@ namespace WPASupplicant {
         public:
             CustomRequest(const string& custom)
                 : Request(custom)
+                , _parent(nullptr)
                 , _signaled(false, true)
                 , _response()
                 , _result(Core::ERROR_NONE)
@@ -635,7 +639,10 @@ namespace WPASupplicant {
             }
             virtual void Completed(const string& response, const bool abort) override
             {
-
+                if ((response == _T("OK")) && (_parent != nullptr)) {
+                    _parent->_statusRequest.Event(CTRL_EVENT_OK);
+                    _parent->Submit(&_parent->_statusRequest);
+                }
                 _result = (abort == false ? Core::ERROR_NONE : Core::ERROR_ASYNC_ABORTED);
                 _response = response;
                 _signaled.SetEvent();
@@ -653,8 +660,13 @@ namespace WPASupplicant {
                 bool result = (_signaled.Lock(waitTime) == Core::ERROR_NONE ? true : false);
                 return (result);
             }
+            inline void EnableEvent(Controller* parent)
+            {
+                _parent = parent;
+            }
 
         private:
+            Controller* _parent;
             Core::Event _signaled;
             string _response;
             uint32_t _result;
@@ -1105,9 +1117,8 @@ namespace WPASupplicant {
 
             return (result);
         }
-        inline uint32_t Connect(const string& SSID)
+        inline uint32_t SelectNetwork(CustomRequest& exchange, const string& SSID, uint64_t& bssid)
         {
-
             uint32_t result = Core::ERROR_UNKNOWN_KEY;
 
             _adminLock.Lock();
@@ -1117,9 +1128,9 @@ namespace WPASupplicant {
             if (index != _enabled.end()) {
 
                 bool AP(false);
-                uint64_t bssid(0);
                 string value;
                 uint32_t id = index->second.Id();
+                bssid = 0;
 
                 _adminLock.Unlock();
 
@@ -1135,7 +1146,14 @@ namespace WPASupplicant {
                 }
 
                 if ((AP == true) || (bssid != 0)) {
-                    result = Connect(SSID, bssid);
+
+                    result = Core::ERROR_NONE;
+                    exchange = string(_TXT("SELECT_NETWORK ")) + Core::NumberType<uint32_t>(index->second.Id()).Text();
+                    exchange.EnableEvent(this);
+                    Submit(&exchange);
+
+                    index->second.State(ConfigInfo::SELECTED);
+
                 } else {
                     TRACE_L1("No associated BSSID to connect to and not defined as AccessPoint. (%llu)", bssid);
                     result = Core::ERROR_BAD_REQUEST;
@@ -1146,54 +1164,54 @@ namespace WPASupplicant {
 
             return (result);
         }
-        inline uint32_t Connect(const string& SSID, const uint64_t bssid)
+        inline uint32_t Reconnect(CustomRequest& exchange)
+        {
+            exchange = string(_TXT("RECONNECT"));
+            exchange.EnableEvent(this);
+            Submit(&exchange);
+
+            return Core::ERROR_NONE;
+        }
+        inline uint32_t Authenticate(CustomRequest& exchange, uint64_t& bssid)
+        {
+            exchange = string(_TXT("PREAUTH ")) + BSSID(bssid);
+            exchange.EnableEvent(this);
+            Submit(&exchange);
+
+            return Core::ERROR_NONE;
+        }
+        inline uint32_t Connect(const string& SSID)
         {
             uint32_t result = Core::ERROR_UNKNOWN_KEY;
 
-            _adminLock.Lock();
+            uint64_t bssid(0);
+            CustomRequest exchange(string(_TXT("")));
 
-            EnabledContainer::iterator index(_enabled.find(SSID));
-
-            if (index != _enabled.end()) {
-                _adminLock.Unlock();
-                result = Core::ERROR_NONE;
-                CustomRequest exchange(string(_TXT("SELECT_NETWORK ")) + Core::NumberType<uint32_t>(index->second.Id()).Text());
-
-                Submit(&exchange);
-
+            result = SelectNetwork(exchange, SSID, bssid);
+            if (result == Core::ERROR_NONE) {
                 if ((exchange.Wait(MaxConnectionTime) == false) || (exchange.Response() != _T("OK"))) {
-
                     result = Core::ERROR_ASYNC_ABORTED;
                 } else {
 
-                    index->second.State(ConfigInfo::SELECTED);
-
                     if (bssid != 0) {
-                        exchange = string(_TXT("RECONNECT"));
 
-                        Submit(&exchange);
-
-                        if ((exchange.Wait(MaxConnectionTime) == false) || (exchange.Response() != _T("OK"))) {
-                            result = Core::ERROR_ASYNC_ABORTED;
-                        } else {
-                            index->second.State(ConfigInfo::SELECTED);
-
-                            exchange = string(_TXT("PREAUTH ")) + BSSID(bssid);
-
-                            Submit(&exchange);
-
+                        result = Reconnect(exchange);
+                        if (result == Core::ERROR_NONE) {
                             if ((exchange.Wait(MaxConnectionTime) == false) || (exchange.Response() != _T("OK"))) {
                                 result = Core::ERROR_ASYNC_ABORTED;
+                            } else {
+
+                                result = Authenticate(exchange, bssid);
+                                if (result == Core::ERROR_NONE) {
+                                    if ((exchange.Wait(MaxConnectionTime) == false) || (exchange.Response() != _T("OK"))) {
+                                        result = Core::ERROR_ASYNC_ABORTED;
+                                    }
+                                }
                             }
                         }
                     }
                 }
-
-                Revoke(&exchange);
-            } else {
-                _adminLock.Unlock();
             }
-
             return (result);
         }
         inline uint32_t Disconnect(const string& SSID)

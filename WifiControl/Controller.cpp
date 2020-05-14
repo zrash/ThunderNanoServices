@@ -416,7 +416,7 @@ namespace WPASupplicant {
         if (_scanTimer.Pending()) {
             TRACE(Trace::Information, ("%s: Ignoring, timer is pending (%d)", __FUNCTION__, _scanTimer.Pending()));
         } else {
-            TRACE_L1("%s: Scheudling next scan in %u ms", __FUNCTION__, _scanInterval);
+            TRACE(Trace::Information,("%s: Scheudling next scan in %u ms", __FUNCTION__, _scanInterval));
             Core::Time NextTick = Core::Time::Now();
             NextTick.Add(scanInterval);
             _scanTimer.Schedule(NextTick.Ticks(), ScanTimer(*this));

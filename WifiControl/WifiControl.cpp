@@ -47,6 +47,9 @@ namespace Plugin
         , _sink(*this)
         , _wpaSupplicant()
         , _controller()
+        , _wifiConnector(this, 120)
+        , _autoConnect(false)
+        , _preferredSsid("Initial")
     {
         RegisterAll();
     }
@@ -62,6 +65,8 @@ namespace Plugin
         config.FromString(service->ConfigLine());
         _skipURL = static_cast<uint8_t>(service->WebPrefix().length());
         _service = service;
+
+        _autoConnect = config.AutoConnect.Value();
 
         if (Core::Directory(service->PersistentPath().c_str()).CreatePath())
             _configurationStore = service->PersistentPath() + "wpa_supplicant.conf";
@@ -113,12 +118,16 @@ namespace Plugin
                             UpdateConfig(profile, index.Current());
                         }
                     }
-                    uint32_t scanInterval = config.ScanInterval.Value() * 1000;
-                    if (scanInterval) {
-                        TRACE(Trace::Information, (_T("Scan scheduled for every %d ms"), scanInterval));
-                        _controller->ScheduleScan(scanInterval);
+                    //uint32_t scanInterval = config.ScanInterval.Value() * 1000;
+                    //if (scanInterval) {
+                    //    TRACE(Trace::Information, (_T("Scan scheduled for every %d ms"), scanInterval));
+                    //    _controller->ScheduleScan(scanInterval);
+                    //}
+                    if (_autoConnect == true) {
+                        _wifiConnector.Connect();
+                    } else {
+                        _controller->Scan();
                     }
-                    _controller->Scan();
                 }
             }
         }
@@ -392,18 +401,27 @@ namespace Plugin
             networks.ToString(message);
 
             _service->Notify(message);
+            if (_autoConnect == true) {
+                _wifiConnector.Scanned();
+            }
             break;
         }
         case WPASupplicant::Controller::CTRL_EVENT_CONNECTED: {
             string message("{ \"event\": \"Connected\", \"ssid\": \"" + _controller->Current() + "\" }");
             _service->Notify(message);
             event_connectionchange(_controller->Current());
+            if (_autoConnect == true) {
+                _wifiConnector.Reset();
+            }
             break;
         }
         case WPASupplicant::Controller::CTRL_EVENT_DISCONNECTED: {
             string message("{ \"event\": \"Disconnected\" }");
             _service->Notify(message);
             event_connectionchange(string());
+            if (_autoConnect == true) {
+                _wifiConnector.Disconnected();
+            }
             break;
         }
         case WPASupplicant::Controller::CTRL_EVENT_NETWORK_CHANGED: {
@@ -419,6 +437,11 @@ namespace Plugin
         case WPASupplicant::Controller::CTRL_EVENT_SCAN_STARTED:
         case WPASupplicant::Controller::WPS_AP_AVAILABLE:
         case WPASupplicant::Controller::AP_ENABLED:
+            break;
+        case WPASupplicant::Controller::CTRL_EVENT_OK:
+            if (_autoConnect == true) {
+                _wifiConnector.OKReceived();
+            }
             break;
         }
     }
