@@ -240,11 +240,10 @@ namespace WPASupplicant {
                 } else if ((event == CTRL_EVENT_SCAN_RESULTS)) {
                     _scanning = false;
                     uint64_t elapsed = Core::Time::Now().Ticks() - _scanStartTime;
+                    TRACE(Trace::Information, ("Scan completed added=%d remove=%d in %lf sec", _added, _removed, ((double_t)elapsed)/1000000) );
                     _adminLock.Lock();
                     Reevaluate();
                     _adminLock.Unlock();
-                    TRACE(Trace::Information, ("Scan completed added=%d remove=%d in %lf sec", _added, _removed, ((double_t)elapsed)/1000000) );
-                    Notify(CTRL_EVENT_SCAN_RESULTS);
                 } else if ((event == CTRL_EVENT_BSS_ADDED) || (event == CTRL_EVENT_BSS_REMOVED)) {
 
                     ASSERT(position != string::npos);
@@ -390,6 +389,9 @@ namespace WPASupplicant {
                 // send out a request for detail.
                 Submit(&_detailRequest);
             }
+        } else if (index == _networks.end()){
+            // Processed all Detail requets, now notify Scan Result
+            _callback->Dispatch(CTRL_EVENT_SCAN_RESULTS);
         } else if (_enabled.size() == 0) {
             // send out a request for the network list
             if (_networkRequest.Set() == true) {
