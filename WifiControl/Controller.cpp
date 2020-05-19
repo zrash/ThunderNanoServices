@@ -31,10 +31,11 @@ ENUM_CONVERSION_BEGIN(WPASupplicant::Controller::events)
     { WPASupplicant::Controller::CTRL_EVENT_BSS_REMOVED, _TXT("CTRL-EVENT-BSS-REMOVED") },
     { WPASupplicant::Controller::CTRL_EVENT_TERMINATING, _TXT("CTRL-EVENT-TERMINATING") },
     { WPASupplicant::Controller::CTRL_EVENT_NETWORK_NOT_FOUND, _TXT("CTRL-EVENT-NETWORK-NOT-FOUND") },
+    { WPASupplicant::Controller::CTRL_EVENT_NETWORK_CHANGED, _TXT("CTRL-EVENT-NETWORK-CHANGED") },
     { WPASupplicant::Controller::WPS_AP_AVAILABLE, _TXT("WPS-AP-AVAILABLE") },
     { WPASupplicant::Controller::AP_ENABLED, _TXT("AP-ENABLED") },
 
-    ENUM_CONVERSION_END(WPASupplicant::Controller::events);
+ENUM_CONVERSION_END(WPASupplicant::Controller::events);
 
 namespace WPASupplicant {
 
