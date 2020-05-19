@@ -53,6 +53,7 @@ namespace WPASupplicant {
             CTRL_EVENT_NETWORK_CHANGED,
             WPS_AP_AVAILABLE,
             AP_ENABLED,
+            CTRL_EVENT_SCAN_FAILED,
             CTRL_EVENT_OK,
         };
 

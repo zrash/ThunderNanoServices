@@ -34,6 +34,8 @@ ENUM_CONVERSION_BEGIN(WPASupplicant::Controller::events)
     { WPASupplicant::Controller::CTRL_EVENT_NETWORK_CHANGED, _TXT("CTRL-EVENT-NETWORK-CHANGED") },
     { WPASupplicant::Controller::WPS_AP_AVAILABLE, _TXT("WPS-AP-AVAILABLE") },
     { WPASupplicant::Controller::AP_ENABLED, _TXT("AP-ENABLED") },
+    { WPASupplicant::Controller::CTRL_EVENT_SCAN_FAILED, _TXT("CTRL-EVENT-SCAN-FAILED") },
+    { WPASupplicant::Controller::CTRL_EVENT_OK, _TXT("CTRL-EVENT-OK") },
 
 ENUM_CONVERSION_END(WPASupplicant::Controller::events);
 
@@ -230,20 +232,23 @@ namespace WPASupplicant {
                     } else {
                         _adminLock.Unlock();
                     }
-                } else if ((event == CTRL_EVENT_SCAN_STARTED)) {
+                } else if (event == CTRL_EVENT_SCAN_STARTED) {
                     // if it is already set then scan started by us in Scan() otherwise intiiated by supplicant e.g. Scan during Connect OR autoscan
                     _scanning = true;
                     _scanStartTime = Core::Time::Now().Ticks();
                     _added = 0;
                     _removed = 0;
                     TRACE(Trace::Information, ("Scan started"));
-                } else if ((event == CTRL_EVENT_SCAN_RESULTS)) {
+                } else if (event == CTRL_EVENT_SCAN_RESULTS) {
                     _scanning = false;
                     uint64_t elapsed = Core::Time::Now().Ticks() - _scanStartTime;
                     TRACE(Trace::Information, ("Scan completed added=%d remove=%d in %lf sec", _added, _removed, ((double_t)elapsed)/1000000) );
                     _adminLock.Lock();
                     Reevaluate();
                     _adminLock.Unlock();
+                } else if (event == CTRL_EVENT_SCAN_FAILED)  {
+                    _scanning = false;
+                    TRACE(Trace::Error, ("Scan Failed"));
                 } else if ((event == CTRL_EVENT_BSS_ADDED) || (event == CTRL_EVENT_BSS_REMOVED)) {
 
                     ASSERT(position != string::npos);
