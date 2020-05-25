@@ -118,15 +118,16 @@ namespace Plugin
                             UpdateConfig(profile, index.Current());
                         }
                     }
-                    //uint32_t scanInterval = config.ScanInterval.Value() * 1000;
-                    //if (scanInterval) {
-                    //    TRACE(Trace::Information, (_T("Scan scheduled for every %d ms"), scanInterval));
-                    //    _controller->ScheduleScan(scanInterval);
-                    //}
+
                     if (_autoConnect == true) {
                         _wifiConnector.Connect();
                     } else {
                         _controller->Scan();
+                        uint32_t scanInterval = config.ScanInterval.Value() * 1000;
+                        if (scanInterval) {
+                            TRACE(Trace::Information, (_T("Scan scheduled for every %d ms"), scanInterval));
+                            _controller->ScheduleScan(scanInterval);
+                        }
                     }
                 }
             }
