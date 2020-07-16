@@ -16,7 +16,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
- 
+
 #include "DisplayInfo.h"
 
 namespace WPEFramework {
@@ -35,6 +35,7 @@ namespace Plugin {
         string message;
         Config config;
 
+        TRACE(Trace::Information, (string(__FUNCTION__)));
         config.FromString(service->ConfigLine());
         _skipURL = static_cast<uint8_t>(service->WebPrefix().length());
 
@@ -53,6 +54,7 @@ namespace Plugin {
 
         if (_connectionProperties == nullptr) {
             message = _T("DisplayInfo could not be instantiated.");
+            TRACE(Trace::Error, (_T("DisplayInfo intialize failed.")));
         }
 
         return message;
@@ -62,6 +64,7 @@ namespace Plugin {
     {
         ASSERT(_connectionProperties != nullptr);
 
+        TRACE(Trace::Information, (string(__FUNCTION__)));
         _notification.Deinitialize();
 
         ASSERT(_graphicsProperties != nullptr);
@@ -93,6 +96,7 @@ namespace Plugin {
     {
         ASSERT(_skipURL <= request.Path.length());
 
+        TRACE_L1("Web request %s", request.Path.c_str());
         Core::ProxyType<Web::Response> result(PluginHost::IFactories::Instance().Response());
 
         // By default, we assume everything works..

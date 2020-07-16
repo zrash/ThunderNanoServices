@@ -16,7 +16,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
- 
+
 #include "../Module.h"
 #include <interfaces/IDisplayInfo.h>
 
@@ -148,7 +148,7 @@ public:
                 _audioPassthrough = false;
             }
         }
- 
+
 
         _adminLock.Lock();
 
@@ -200,6 +200,7 @@ private:
 
         // Create string from buffer.
         Core::ToString(equal, value);
+        TRACE(Trace::Information, (_T("request %s value %s"), request, value.c_str()));
     }
     template<typename VALUE>
     void Command(const char request[], VALUE& result) const

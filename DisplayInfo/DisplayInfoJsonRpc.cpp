@@ -16,7 +16,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
- 
+
 #include "DisplayInfo.h"
 
 namespace WPEFramework {
@@ -46,6 +46,7 @@ namespace Plugin {
     //  - ERROR_NONE: Success
     uint32_t DisplayInfo::get_displayinfo(DisplayinfoData& response) const
     {
+        TRACE(Trace::Information, (string(__FUNCTION__)));
         Info(response);
         return Core::ERROR_NONE;
     }
@@ -53,6 +54,7 @@ namespace Plugin {
     // Event: updated - Notifies about a change/update in the connection
    void DisplayInfo::event_updated()
    {
+        TRACE(Trace::Information, (string(__FUNCTION__)));
         Notify(_T("updated"));
    }
 } // namespace Plugin
