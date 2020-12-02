@@ -20,18 +20,16 @@
 #include "DIALServer.h"
 
 #include "interfaces/IBrowser.h"
-#include "interfaces/ISwitchBoard.h"
 
 namespace WPEFramework {
 namespace DIALHandlers {
 
     class YouTube : public Plugin::DIALServer::Default {
-    private:
+    public:
         YouTube() = delete;
         YouTube(const YouTube&) = delete;
         YouTube& operator=(const YouTube&) = delete;
 
-    public:
 #ifdef __WINDOWS__
 #pragma warning(disable : 4355)
 #endif
@@ -39,13 +37,14 @@ namespace DIALHandlers {
             : Default(service, config, parent)
             , _browser(nullptr)
             , _hidden(false)
+            , _hasHide(config.Hide.Value())
             , _notification(this)
         {
         }
 #ifdef __WINDOWS__
 #pragma warning(default : 4355)
 #endif
-        virtual ~YouTube()
+        ~YouTube() override
         {
             Stopped({}, {});
         }
@@ -53,9 +52,10 @@ namespace DIALHandlers {
     public:
         uint32_t Start(const string& params, const string& payload) override
         {
-            return Default::Start(params + _T("&") + payload, {});
-        }
+            _browser->Hide(false);
 
+            return Default::Start(params, payload);
+        }
         bool Connect() override
         {
             _browser = Plugin::DIALServer::Default::QueryInterface<Exchange::IBrowser>();
@@ -77,47 +77,61 @@ namespace DIALHandlers {
                 _browser = nullptr;
             }
         }
-
-        bool HasHideAndShow() const override {
-            return _browser != nullptr;
+        bool HasHide() const override
+        {
+            return ((_browser != nullptr) && (_hasHide == true));
         }
-
-        uint32_t Show() override {
-            _browser->Hide(false);
-            return Core::ERROR_NONE;
-        }
-
-        void Hide() override {
+        void Hide() override
+        {
             _browser->Hide(true);
         }
-
-        bool IsHidden() const override {
+        bool IsHidden() const override
+        {
             return _hidden;
-        }
-
-        bool URL(const string& url, const string& payload) override {
-            _browser->SetURL(url + _T("&") + payload);
-            return (true);
         }
 
     private:
         struct Notification : public Exchange::IBrowser::INotification {
-            explicit Notification(YouTube* parent) : _parent(parent) {}
-            void LoadFinished(const string& URL) override {}
-            void URLChanged(const string& URL) override {}
-            void Hidden(const bool hidden) override { _parent->_hidden = hidden; }
-            void Closure() override {}
+        public:
+            Notification() = delete;
+            Notification(const Notification&) = delete;
+            Notification& operator=(const Notification&) = delete;
 
-            BEGIN_INTERFACE_MAP(YouTube)
+        public:
+            explicit Notification(YouTube* parent)
+                : _parent(parent)
+            {
+            }
+            ~Notification() = default;
+
+        public:
+            void Hidden(const bool hidden) override
+            {
+                _parent->_hidden = hidden;
+            }
+            void LoadFinished(const string& URL) override
+            {
+            }
+            void URLChanged(const string& URL) override
+            {
+            }
+            void Closure() override
+            {
+            }
+
+            BEGIN_INTERFACE_MAP(Notification)
                 INTERFACE_ENTRY(Exchange::IBrowser::INotification)
             END_INTERFACE_MAP
 
+        private:
             YouTube* _parent;
         };
+
         Exchange::IBrowser* _browser;
         bool _hidden;
+        bool _hasHide;
         Core::Sink<Notification> _notification;
-    };
+    }; // class YouTube
 
     static Plugin::DIALServer::ApplicationRegistrationType<YouTube> _youTubeHandler;
 }

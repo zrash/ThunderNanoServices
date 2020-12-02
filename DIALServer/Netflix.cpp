@@ -20,10 +20,32 @@
 #include "DIALServer.h"
 
 #include "interfaces/INetflix.h"
-#include "interfaces/ISwitchBoard.h"
 
 namespace WPEFramework {
 namespace DIALHandlers {
+
+    static string Query(const string& params, const string& payload)
+    {
+        string query = params;
+#ifdef NETFLIX_VERSION_5_1
+            // Set proper launch type, i.e. launched by DIAL
+            query += _T("&source_type=12");
+#endif
+#ifdef NETFLIX_VERSION_5_2
+            // Set proper launch type, i.e. launched by DIAL
+            // FIXME: Use project specific iid for now
+            query += _T("&iid=7637f789");
+#endif
+       if (payload.empty() == false) {
+           // Netflix expects the payload as urlencoded option "dial"
+            const uint16_t maxEncodeSize = static_cast<uint16_t>(payload.length() * 3 * sizeof(TCHAR));
+            TCHAR* encodedPayload = reinterpret_cast<TCHAR*>(ALLOCA(maxEncodeSize));
+            Core::URL::Encode(payload.c_str(), static_cast<uint16_t>(payload.length()), encodedPayload, maxEncodeSize);
+            query = query + _T("&dial=") + encodedPayload;
+        }
+    
+        return (query);
+    }
 
     class Netflix : public Plugin::DIALServer::Default {
     public:
@@ -31,51 +53,42 @@ namespace DIALHandlers {
         Netflix(const Netflix&) = delete;
         Netflix& operator=(const Netflix&) = delete;
 
-    public:
         Netflix(PluginHost::IShell* service, const Plugin::DIALServer::Config::App& config, Plugin::DIALServer *parent)
             : Default(service, config, parent)
             , _netflix(nullptr)
             , _service(nullptr)
             , _notification(*this)
             , _hidden(false)
+            , _hasHide(config.Hide.Value())
             , _lock()
             , _callsign(config.Callsign.Value())
         {
             ASSERT(service != nullptr);
             ASSERT(parent != nullptr);
-            if (_callsign.empty() == false) {
-                service->Register(&_notification);
-            }
+            service->Register(&_notification);
         }
         ~Netflix() override
         {
             Detach();
-            if (_callsign.empty() == false) {
-                _service->Unregister(&_notification);
-            }
+            _service->Unregister(&_notification);
         }
 
     public:
         uint32_t Start(const string& params, const string& payload) override
         {
-            string query = params;
+            const string query = Query(params, payload);
 
-            // Set proper launch type, i.e. launched by DIAL
-            query += _T("&source_type=12");
+            _lock.Lock();
+            if ((_netflix != nullptr) && (_hidden == true)) {
+                _netflix->SetVisible(true);
+                _hidden = false;
+            } 
+            _lock.Unlock();
 
-            if (payload.empty() == false) {
-                // Netflix expects the payload as urlencoded option "dial"
-                TCHAR encodedPayload[payload.length() * 3 * sizeof(TCHAR)];
-                Core::URL::Encode(payload.c_str(), static_cast<uint16_t>(payload.length()), encodedPayload, static_cast<uint16_t>(sizeof(encodedPayload)));
-                query = query + _T("&dial=") + encodedPayload;
-            }
+            // Set custom query paramters
+            Core::SystemInfo::SetEnvironment(_T("ONE_TIME_QUERY_STRING_OVERRIDE"), query.c_str());
 
-            if (_callsign.empty() == false) {
-                // Set custom query paramters
-                Core::SystemInfo::SetEnvironment(_T("ONE_TIME_QUERY_STRING_OVERRIDE"), query.c_str());
-            }
-
-            return (Default::Start(query, {}));
+            return (Default::Start(query, payload));
         }
         void Stop(const string& params, const string& payload) override
         {
@@ -91,22 +104,9 @@ namespace DIALHandlers {
         {
             return (_netflix != nullptr);
         }
-        bool HasHideAndShow() const override
+        bool HasHide() const override
         {
-            return (_netflix != nullptr);
-        }
-        uint32_t Show() override
-        {
-            _lock.Lock();
-            uint32_t result = Core::ERROR_NONE;
-            _hidden = false;
-            if (_netflix != nullptr) {
-                _netflix->SetVisible(true);
-            } else {
-                result = Core::ERROR_GENERAL;
-            }
-            _lock.Unlock();
-            return (result);
+            return ((_netflix != nullptr) && (_hasHide == true));
         }
         void Hide() override
         {
@@ -157,7 +157,9 @@ namespace DIALHandlers {
             Notification() = delete;
             Notification(const Notification&) = delete;
             Notification& operator=(const Notification&) = delete;
-            Notification(Netflix& parent)
+
+        public:
+            explicit Notification(Netflix& parent)
                 : _parent(parent)
             {
             }
@@ -170,7 +172,7 @@ namespace DIALHandlers {
                 if (shell->Callsign() == _parent.Callsign()) {
                     if (shell->State() == PluginHost::IShell::ACTIVATED) {
                         _parent.Attach();
-                    } else if (shell->State() == PluginHost::IShell::DEACTIVATED) {
+                    } else if (shell->State() == PluginHost::IShell::DEACTIVATION) {
                         _parent.Detach();
                     }
                 }
@@ -190,9 +192,10 @@ namespace DIALHandlers {
         PluginHost::IShell* _service;
         Core::Sink<Notification> _notification;
         bool _hidden;
+        bool _hasHide;
         mutable Core::CriticalSection _lock;
         string _callsign;
-    };
+    }; // class Netflix
 
     static Plugin::DIALServer::ApplicationRegistrationType<Netflix> _netflixHandler;
 }
