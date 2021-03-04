@@ -21,9 +21,11 @@
 
 #include "Module.h"
 #include <interfaces/IBrowser.h>
+#include <interfaces/IApplication.h>
 #include <interfaces/IMemory.h>
 #include <interfaces/json/JsonData_Browser.h>
 #include <interfaces/json/JsonData_StateControl.h>
+#include <interfaces/json/JApplication.h>
 
 namespace WPEFramework {
 namespace Plugin {
@@ -115,13 +117,10 @@ public:
 
 public:
     Cobalt() :
-            _skipURL(0), _hidden(false), _cobalt(nullptr),
+            _skipURL(0), _hidden(false), _cobalt(nullptr), _application(nullptr),
             _memory(nullptr), _service(nullptr), _notification(this) {
-        RegisterAll();
     }
     virtual ~Cobalt() {
-        TRACE_L1("Destructor Cobalt.%d", __LINE__);
-        UnregisterAll();
     }
 
 public:
@@ -178,6 +177,9 @@ private:
             Core::JSON::EnumType<JsonData::StateControl::StateType> &response) const; // StateControl
     uint32_t set_state(
             const Core::JSON::EnumType<JsonData::StateControl::StateType> &param); // StateControl
+    uint32_t endpoint_delete(const JsonData::Browser::DeleteParamsData& params);
+    uint32_t DeleteDir(const string& path);
+    uint32_t set_deeplink(const Core::JSON::String &param); // Application
     void event_urlchange(const string &url, const bool &loaded); // Browser
     void event_visibilitychange(const bool &hidden); // Browser
     void event_statechange(const bool &suspended); // StateControl
@@ -187,9 +189,11 @@ private:
     uint32_t _connectionId;
     bool _hidden;
     Exchange::IBrowser *_cobalt;
+    Exchange::IApplication *_application;
     Exchange::IMemory *_memory;
     PluginHost::IShell *_service;
     Core::Sink<Notification> _notification;
+    string _persistentStoragePath;
 };
 }
 } // namespace

@@ -36,17 +36,16 @@ namespace Plugin {
     class WifiControl : public PluginHost::IPlugin, public PluginHost::IWeb, public PluginHost::JSONRPC {
     private:
         class Sink : public Core::IDispatchType<const WPASupplicant::Controller::events> {
-        private:
+        public:
             Sink() = delete;
             Sink(const Sink&) = delete;
             Sink& operator=(const Sink&) = delete;
 
-        public:
             Sink(WifiControl& parent)
                 : _parent(parent)
             {
             }
-            virtual ~Sink()
+            ~Sink() override
             {
             }
 
@@ -59,13 +58,11 @@ namespace Plugin {
         private:
             WifiControl& _parent;
         };
-
         class WifiDriver {
-        private:
+        public:
             WifiDriver(const WifiDriver&) = delete;
             WifiDriver& operator=(const WifiDriver&) = delete;
 
-        public:
             WifiDriver()
                 : _interfaceName()
                 , _connector()
@@ -77,12 +74,12 @@ namespace Plugin {
             }
 
         public:
-            uint32_t Launch(const string& application, const string& connector, const string& interfaceName, const uint16_t waitTime)
+            uint32_t Launch(const string& connector, const string& interfaceName, const uint16_t waitTime)
             {
                 _interfaceName = interfaceName;
                 _connector = connector;
 
-                Core::Process::Options options(application);
+                Core::Process::Options options(_T("/usr/sbin/wpa_supplicant"));
                 /* interface name *mandatory */
                 options.Add(_T("-i")+ _interfaceName);
 
@@ -100,7 +97,7 @@ namespace Plugin {
                 options.Add(_T("-f/tmp/wpasupplicant.log"));
 #endif
 
-                TRACE_L1("Launching %s.", options.Command().c_str());
+                TRACE(Trace::Information, (_T("Launching %s."), options.Command().c_str()));
                 uint32_t result = _process.Launch(options, &_pid);
 
                 if (result == Core::ERROR_NONE) {
@@ -136,223 +133,313 @@ namespace Plugin {
             Core::Process _process;
             uint32_t _pid;
         };
-
-        class WifiConnector
+        class AutoConnect : public WPASupplicant::Controller::IConnectCallback
         {
         private:
-            using Job = Core::WorkerPool::JobType<WifiConnector&>;
-            using SsidList = std::list <std::pair<int32_t, const string> >;
+            class AccessPoint 
+            {
+            public:
+                AccessPoint() = delete;
+                AccessPoint(const AccessPoint&) = delete;
+                AccessPoint& operator= (const AccessPoint&) = delete;
 
-            enum states
+                AccessPoint(const int32_t strength, const uint64_t& bssid, const string& SSID) 
+                    : _strength(strength)
+                    , _bssid(bssid)
+                    , _ssid(SSID) {
+                }
+                ~AccessPoint() {
+                }
+
+            public:
+                const string& SSID() const {
+                    return(_ssid);
+                }
+                const uint64_t& BSSID() const {
+                    return(_bssid);
+                }
+                int32_t Signal() const {
+                    return (_strength);
+                }
+
+            private:
+                int32_t _strength;
+                uint64_t _bssid;
+                string _ssid;
+            };
+            using Job = Core::WorkerPool::JobType<AutoConnect&>;
+            using SSIDList = std::list<AccessPoint>;
+
+            enum class states : uint8_t
             {
                 IDLE,
                 SCANNING,
-                PROCESSING,
+                SCANNED,
                 CONNECTING,
-                RECONNECTING,
-                AUTHENTICATION,
+                RETRY
             };
 
         public:
-            WifiConnector() = delete;
-            WifiConnector(const WifiConnector&) = delete;
-            WifiConnector& operator=(const WifiConnector&) = delete;
+            AutoConnect() = delete;
+            AutoConnect(const AutoConnect&) = delete;
+            AutoConnect& operator=(const AutoConnect&) = delete;
 
-            WifiConnector(WifiControl* parent, const uint8_t scheduleInterval)
+            AutoConnect(Core::ProxyType<WPASupplicant::Controller>& controller)
                 : _adminLock()
-                , _parent(*parent)
+                , _controller(controller)
                 , _job(*this)
-                , _state(IDLE)
-                , _prevState(IDLE)
+                , _state(states::IDLE)
                 , _ssidList()
-                , _schedInterval(scheduleInterval * 1000)
-                , _exchange(string(_TXT("")))
-                , _bssid(0)
-            {
-                ASSERT(parent != nullptr);
-            }
-            ~WifiConnector()
+                , _interval(0)
+                , _attempts(0)
+                , _preferred()
             {
             }
-            void Dispatch()
+            ~AutoConnect() override
             {
-                uint32_t scheduleTime = ~0;
+            }
+
+        public:
+            uint32_t Connect(const string& SSID, const uint8_t scheduleInterval, const uint32_t attempts) 
+            {
+                uint32_t result = Core::ERROR_INPROGRESS;
+
+                ASSERT (_controller.IsValid());
 
                 _adminLock.Lock();
 
-                if (_state == SCANNING) {
+                if (_state == states::IDLE) {
 
-                    _parent._controller->Scan();
-                    scheduleTime = _schedInterval;
-
-                } else if (_state == PROCESSING) {
-
-                    /* Arrange SSIDs in sorted order as per signal strength */
-                    WPASupplicant::Network::Iterator list(
-                            _parent._controller->Networks());
-                    while (list.Next() == true) {
-                        const WPASupplicant::Network& net = list.Current();
-                        if (_parent._controller->Get(net.SSID()).IsValid()) {
-
-                            int32_t strength(net.Signal());
-                            if (net.SSID().compare(_parent.PreferredSSID()) == 0) {
-                                strength = Core::NumberType<int32_t>::Max();
-                            }
-                            auto index(_ssidList.begin());
-                            while ((index != _ssidList.end())
-                                    && (index->first > strength)) {
-                                index++;
-                            }
-                            _ssidList.emplace(index,
-                                    std::pair<int32_t, string>(strength,
-                                            net.SSID()));
-                        }
-                    }
-                    _state = _prevState = CONNECTING;
+                    _preferred = SSID;
+                    _attempts = attempts;
+                    _interval = (scheduleInterval * 1000);
+                    result = Scan();
                 }
-                if (_state >= CONNECTING) {
 
-                    if (_prevState != _state) {
-                        _prevState = _state;
-                    } else {
-                        // Move to next SSID
-                        _state = CONNECTING;
-                    }
-                    if (_state == CONNECTING) {
-
-                        if (_ssidList.empty() == false) {
-
-                            _parent._controller->SelectNetwork(_exchange,
-                                    _ssidList.front().second, _bssid);
-                            _ssidList.pop_front();
-                        } else {
-                            TRACE(Trace::Warning, (_T("Tried all opportunities, retrying again")));
-                            _state = SCANNING;
-                        }
-                    } else if (_state == RECONNECTING) {
-
-                        _parent._controller->Reconnect(_exchange);
-                    } else if (_state == AUTHENTICATION) {
-
-                        _parent._controller->Authenticate(_exchange, _bssid);
-                    }
-
-                    scheduleTime = _schedInterval;
-                }
                 _adminLock.Unlock();
 
-                if (scheduleTime != static_cast<uint32_t>(~0)) {
-                    _job.Schedule(Core::Time::Now().Add(scheduleTime));
-                }
+                return (result);
+            }
+            void SetPreferred(const string& ssid, const uint8_t scheduleInterval, const uint32_t attempts)
+            {
+                _adminLock.Lock();
+
+                _preferred.assign(ssid);
+                _attempts = attempts;
+                _interval = (scheduleInterval * 1000);
+
+                _adminLock.Unlock();
+            }
+            inline uint32_t Scan()
+            {
+                MoveState (states::SCANNING);
+
+                _controller->Scan();
+                _job.Schedule(Core::Time::Now().Add(_interval));
+
+                return Core::ERROR_NONE;
+            }
+            uint32_t Revoke()
+            {
+                _adminLock.Lock();
+
+                MoveState(states::IDLE);
+
+                _attempts = 0;
+                _interval = 0;
+                _controller->Revoke(this);
+
+                _adminLock.Unlock();
+
+                return(Core::ERROR_INPROGRESS);
             }
             void Scanned()
             {
                 _adminLock.Lock();
-                if (_state == SCANNING) {
-                    _state = PROCESSING;
-                    _adminLock.Unlock();
 
-                    _job.Revoke();
-                    _job.Submit();
-                } else {
-                    _adminLock.Unlock();
-                }
-            }
-            void Connect()
-            {
-                if (_parent.PreferredSSID().empty() == false)
-                {
-                    _adminLock.Lock();
-                    _state = SCANNING;
-                    _adminLock.Unlock();
+                if ( (_state == states::SCANNING) || (_state == states::RETRY) ) {
 
-                    _job.Revoke();
+                    MoveState(states::SCANNED);
+
                     _job.Submit();
-                }
-            }
-            void Reset()
-            {
-                _adminLock.Lock();
-                _state = IDLE;
+               }
+
                 _adminLock.Unlock();
-
-                _job.Revoke();
-                _ssidList.clear();
             }
-            void Disconnected()
+            void Disconnected ()
             {
                 _adminLock.Lock();
-                if (_state >= CONNECTING) {
-                    _adminLock.Unlock();
+                WPASupplicant::Controller::reasons reason = _controller->DisconnectReason();
 
-                    _job.Revoke();
-                    _job.Submit();
-                } else {
-                    _adminLock.Unlock();
-                    Reset();
-                    Connect();
+                if (((reason == WPASupplicant::Controller::WLAN_REASON_NOINFO_GIVEN) ||
+                     (reason == WPASupplicant::Controller::WLAN_REASON_DEAUTH_LEAVING)) &&
+                    (_state == states::IDLE) && (_attempts > 0)) {
+                    Scan();
                 }
+                _adminLock.Unlock();
             }
-            void OKReceived()
-            {
-                bool stateChanged = true;
 
+            void Dispatch()
+            {
                 _adminLock.Lock();
 
-                if (_state == CONNECTING) {
-                    if (_bssid != 0) {
-                        _state = RECONNECTING;
-                    } else {
-                        stateChanged = false;
+                // Oke, the Job timed out, or we need a new CONNECTION request....
+                if (_state == states::SCANNING) {
+                    // Seems that the Scan did not complete in time. Lets reschedule for later...
+                    _state = states::RETRY;
+                    _job.Schedule(Core::Time::Now().Add(_interval));
+                }
+                else if (_state == states::SCANNED) {
+
+                    // This is a transitional state due to the fact that the  call to
+                    // _controller->Get(net.SSID()) takes a long time, it should not 
+                    // be executed on an independend worker thread.
+
+                    _ssidList.clear();
+
+                    /* Arrange SSIDs in sorted order as per signal strength */
+                    WPASupplicant::Network::Iterator list(_controller->Networks());
+                    while (list.Next() == true) {
+                        const WPASupplicant::Network& net = list.Current();
+                        if (_controller->Get(net.SSID()).IsValid()) {
+
+                            int32_t strength(net.Signal());
+                            if (net.SSID().compare(_preferred) == 0) {
+                                strength = Core::NumberType<int32_t>::Max();
+                            }
+
+                            SSIDList::iterator index(_ssidList.begin());
+                            while ((index != _ssidList.end()) && (index->Signal() > strength)) {
+                                index++;
+                            }
+                            _ssidList.emplace(index, strength, net.BSSID(), net.SSID());
+                        }
                     }
-                } else if (_state == RECONNECTING) {
-                    _state = AUTHENTICATION;
-                } else if (_state == AUTHENTICATION) {
-                    stateChanged = false;
+
+                    if (_ssidList.size() == 0) {
+                        _state = states::RETRY;
+                    }
+                    else {
+                        _state = states::CONNECTING;
+                        _controller->Connect(this, _ssidList.front().SSID(), _ssidList.front().BSSID());
+                    }
+
+                    _job.Schedule(Core::Time::Now().Add(_interval));
+                }
+                else if (_state == states::CONNECTING) {
+                    // If we sre still in the CONNECTING mode, it must mean that previous CONNECT Failed
+                    if (_ssidList.size() > 0) {
+                        _ssidList.pop_front();
+                    }
+
+                    _controller->Revoke(this);
+                    if (_ssidList.size() == 0) {
+                        _state = states::RETRY;
+                    }
+                    else {
+                        _controller->Connect(this, _ssidList.front().SSID(), _ssidList.front().BSSID());
+                    }
+                    _job.Schedule(Core::Time::Now().Add(_interval));
+                }
+                else if (_state == states::RETRY) {
+                    if (_attempts == 0) {
+                        _state = states::IDLE;
+                    }
+                    else {
+                        if (_attempts != static_cast<uint32_t>(~0)) {
+                            --_attempts;
+                        }
+                        _state = states::SCANNING;
+                        _controller->Scan();
+
+                        _job.Schedule(Core::Time::Now().Add(_interval));
+                    }
                 }
 
                 _adminLock.Unlock();
+            }
 
-                if (stateChanged == true) {
-                    _job.Revoke();
+            void UpdateStatus(const uint32_t result) {
+
+                if ((result != Core::ERROR_NONE) && (result != Core::ERROR_ALREADY_CONNECTED)) {
+                    _adminLock.Lock();
+
+                    _state = states::CONNECTING;
+                    _adminLock.Unlock();
+
                     _job.Submit();
                 }
             }
 
         private:
+            void MoveState(const states newState) {
+                _state = states::IDLE;
+
+                _adminLock.Unlock();
+
+                _job.Revoke();
+
+                _adminLock.Lock();
+
+                _state = newState;
+            }
+
+            void Completed(const uint32_t result) override {
+
+                _controller->Revoke(this);
+
+                _adminLock.Lock();
+
+                if ((result == Core::ERROR_NONE) || (result == Core::ERROR_ALREADY_CONNECTED)) {
+
+                    MoveState(states::IDLE);
+
+                    _ssidList.clear();
+                }
+                else {
+                    MoveState(states::CONNECTING);
+
+                    _job.Submit();
+                }
+                _adminLock.Unlock();
+            }
+
+
+        private:
             Core::CriticalSection _adminLock;
-            WifiControl& _parent;
+            Core::ProxyType<WPASupplicant::Controller>& _controller;
             Job _job;
             states _state;
-            states _prevState;
-            SsidList _ssidList;
-            uint32_t _schedInterval;
-            WPASupplicant::Controller::CustomRequest _exchange;
-            uint64_t _bssid;
+            SSIDList _ssidList;
+            uint32_t _interval;
+            uint32_t _attempts;
+            string _preferred;
         };
 
     public:
         class Config : public Core::JSON::Container {
-        private:
+        public:
             Config(const Config&) = delete;
             Config& operator=(const Config&) = delete;
 
-        public:
             Config()
-                : Core::JSON::Container()
-                , Connector(_T("/var/run/wpa_supplicant"))
+                : Connector(_T("/var/run/wpa_supplicant"))
                 , Interface(_T("wlan0"))
                 , Application(_T("/usr/sbin/wpa_supplicant"))
                 , BssExpirationAge(_T("180"))
                 , ScanInterval(120)
+                , Preferred()
                 , AutoConnect(false)
+                , RetryInterval(30)
             {
                 Add(_T("connector"), &Connector);
                 Add(_T("interface"), &Interface);
                 Add(_T("application"), &Application);
                 Add(_T("bssexpiration"), &BssExpirationAge);
                 Add(_T("scanInterval"), &ScanInterval);
+                Add(_T("preferred"), &Preferred);
                 Add(_T("autoconnect"), &AutoConnect);
+                Add(_T("retryinterval"), &RetryInterval);
             }
             virtual ~Config()
             {
@@ -364,7 +451,9 @@ namespace Plugin {
             Core::JSON::String Application;
             Core::JSON::String BssExpirationAge;
             Core::JSON::DecUInt32 ScanInterval;
+            Core::JSON::String Preferred;
             Core::JSON::Boolean AutoConnect;
+            Core::JSON::DecUInt8 RetryInterval;
         };
 
         static void FillNetworkInfo(const WPASupplicant::Network& info, JsonData::WifiControl::NetworkInfo& net)
@@ -413,7 +502,8 @@ namespace Plugin {
             if (element.IsUnsecure() == true) {
                 info.Type = JsonData::WifiControl::TypeType::UNSECURE;
             } else if (element.IsWPA() == true) {
-                info.Type = JsonData::WifiControl::TypeType::WPA;
+                info.Type = GetWPAProtocolType(element.Protocols());
+
                 if (element.Hash().empty() == false) {
                     info.Hash = element.Hash();
                 } else {
@@ -429,29 +519,42 @@ namespace Plugin {
             info.Hidden = element.IsHidden();
         }
 
-        static void UpdateConfig(WPASupplicant::Config& profile, const JsonData::WifiControl::ConfigInfo& settings)
+        static bool UpdateConfig(WPASupplicant::Config& profile, const JsonData::WifiControl::ConfigInfo& settings)
         {
+            bool status = true;
 
-            if (settings.Hash.IsSet() == true) {
+            if (settings.Hash.IsSet() == true || settings.Psk.IsSet() == true) {
+
                 // Seems we are in WPA mode !!!
-                profile.Hash(settings.Hash.Value());
-            } else if (settings.Psk.IsSet() == true) {
-                // Seems we are in WPA mode !!!
-                profile.PresharedKey(settings.Psk.Value());
+                uint8_t protocolFlags = GetWPAProtocolFlags(settings, true);
+                status = profile.Protocols(protocolFlags);
+
+                if (status == true) {
+                    if (settings.Hash.IsSet() == true) {
+                        status = profile.Hash(settings.Hash.Value());
+                        TRACE_GLOBAL(Trace::Information, (_T("Setting Hash %s is %s"), settings.Hash.Value().c_str(), (status ? "Success": "Failed")));
+                    } else {
+                        status = profile.PresharedKey(settings.Psk.Value());
+                        TRACE_GLOBAL(Trace::Information, (_T("Setting PresharedKey %s is %s"), settings.Psk.Value().c_str(), (status ? "Success": "Failed")));
+                    }
+                }
+
             } else if ((settings.Identity.IsSet() == true) && (settings.Password.IsSet() == true)) {
                 // Seems we are in Enterprise mode !!!
-                profile.Enterprise(settings.Identity.Value(), settings.Password.Value());
+                status = profile.Enterprise(settings.Identity.Value(), settings.Password.Value());
+                TRACE_GLOBAL(Trace::Information, (_T("Setting Enterprise values %s:%s is %s"),settings.Identity.Value().c_str(), settings.Password.Value().c_str(), (status ? "Success": "Failed")));
             } else if ((settings.Identity.IsSet() == false) && (settings.Password.IsSet() == false)) {
                 // Seems we are in UNSECURE mode !!!
-                profile.Unsecure();
+                status = profile.Unsecure();
             }
 
-            if (settings.Accesspoint.IsSet() == true) {
-                profile.Mode(settings.Accesspoint.Value() ? 2 : 0);
+            if ((status == true) && (settings.Accesspoint.IsSet() == true)) {
+                status = profile.Mode(settings.Accesspoint.Value() ? 2 : 0);
             }
-            if (settings.Hidden.IsSet() == true) {
-                profile.Hidden(settings.Hidden.Value());
+            if ((status == true) && (settings.Hidden.IsSet() == true)) {
+                status = profile.Hidden(settings.Hidden.Value());
             }
+            return status;
         }
 
 
@@ -529,39 +632,6 @@ namespace Plugin {
         {
             UnregisterAll();
         }
-        const string& PreferredSSID() const
-        {
-            return (_preferredSsid);
-        }
-        uint32_t Connect(const std::string& ssid)
-        {
-            if (ssid.compare(_controller->Current()) != 0) {
-
-                _preferredSsid.assign(ssid);
-                if (_controller->Current().empty() == true) {
-                    _wifiConnector.Connect();
-                } else {
-                    _controller->Disconnect(_controller->Current());
-                }
-            }
-            return Core::ERROR_NONE;
-        }
-        uint32_t Disconnect(const std::string& ssid)
-        {
-            uint32_t result = Core::ERROR_UNKNOWN_KEY;
-            if (ssid.compare(_controller->Current()) == 0) {
-
-                _preferredSsid.clear();
-                result = _controller->Disconnect(_controller->Current());
-            }
-            return result;
-        }
-
-        BEGIN_INTERFACE_MAP(WifiControl)
-        INTERFACE_ENTRY(PluginHost::IPlugin)
-        INTERFACE_ENTRY(PluginHost::IWeb)
-        INTERFACE_ENTRY(PluginHost::IDispatcher)
-        END_INTERFACE_MAP
 
     public:
         //   IPlugin methods
@@ -576,23 +646,17 @@ namespace Plugin {
         virtual Core::ProxyType<Web::Response> Process(const Web::Request& request) override;
 
     private:
+        // Helper methods
+        static uint8_t GetWPAProtocolFlags(const JsonData::WifiControl::ConfigInfo& settings, const bool safeFallback);
+        static JsonData::WifiControl::TypeType GetWPAProtocolType(const uint8_t protocolFlags);
+    
+    private:
         Core::ProxyType<Web::Response> GetMethod(Core::TextSegmentIterator& index);
         Core::ProxyType<Web::Response> PutMethod(Core::TextSegmentIterator& index, const Web::Request& request);
         Core::ProxyType<Web::Response> PostMethod(Core::TextSegmentIterator& index, const Web::Request& request);
         Core::ProxyType<Web::Response> DeleteMethod(Core::TextSegmentIterator& index);
 
         void WifiEvent(const WPASupplicant::Controller::events& event);
-
-    private:
-        uint8_t _skipURL;
-        PluginHost::IShell* _service;
-        string _configurationStore;
-        Sink _sink;
-        WifiDriver _wpaSupplicant;
-        Core::ProxyType<WPASupplicant::Controller> _controller;
-        WifiConnector _wifiConnector;
-        bool _autoConnect;
-        std::string _preferredSsid;
         void RegisterAll();
         void UnregisterAll();
         uint32_t endpoint_delete(const JsonData::WifiControl::DeleteParamsInfo& params);
@@ -609,6 +673,72 @@ namespace Plugin {
         void event_scanresults(const Core::JSON::ArrayType<JsonData::WifiControl::NetworkInfo>& list);
         void event_networkchange();
         void event_connectionchange(const string& ssid);
+
+        inline uint32_t Connect(const string& ssid) {
+
+            if (_autoConnectEnabled == true) {
+                _autoConnect.Revoke();
+            }
+
+            uint32_t result = _controller->Connect(ssid);
+
+            if ((result != Core::ERROR_INPROGRESS) && (_autoConnectEnabled == true)) {
+                _autoConnect.SetPreferred(ssid, _retryInterval, ~0);
+                _autoConnect.UpdateStatus(result);
+            }
+
+            return result;
+        }
+        inline uint32_t Disconnect(const string& ssid) {
+
+            if (_autoConnectEnabled == true) {
+                _autoConnect.Revoke();
+            }
+
+            return _controller->Disconnect(ssid);
+        }
+        inline uint32_t Store() {
+            uint32_t result = Core::ERROR_NONE;
+
+            Core::File configFile(_configurationStore);
+            WPASupplicant::Config::Iterator list(_controller->Configs());
+            WifiControl::ConfigList configs;
+            configs.Set(list);
+            if (configs.Configs.IsSet()) {
+                if (configFile.Create() == true) {
+                    if (configs.IElement::ToFile(configFile) == true) {
+                    } else {
+                        TRACE(Trace::Information, (_T("Failed to write config settings to %s"), _configurationStore.c_str()));
+                        result = Core::ERROR_WRITE_ERROR;
+                    }
+                } else {
+                    TRACE(Trace::Information, (_T("Failed to create config file %s"), _configurationStore.c_str()));
+                    result = Core::ERROR_WRITE_ERROR;
+                }
+            } else {
+                if (configFile.Exists() == true) {
+                    configFile.Destroy();
+                }
+            }
+            return result;
+        }
+
+        BEGIN_INTERFACE_MAP(WifiControl)
+            INTERFACE_ENTRY(PluginHost::IPlugin)
+            INTERFACE_ENTRY(PluginHost::IWeb)
+            INTERFACE_ENTRY(PluginHost::IDispatcher)
+        END_INTERFACE_MAP
+
+    private:
+        uint8_t _skipURL;
+        uint8_t _retryInterval;
+        PluginHost::IShell* _service;
+        string _configurationStore;
+        Sink _sink;
+        WifiDriver _wpaSupplicant;
+        Core::ProxyType<WPASupplicant::Controller> _controller;
+        AutoConnect _autoConnect;
+        bool _autoConnectEnabled;
     };
 
 } // namespace Plugin

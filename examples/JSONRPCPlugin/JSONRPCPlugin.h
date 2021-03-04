@@ -31,6 +31,8 @@
 // within the plugin to make it available. 
 #include <interfaces/IMath.h>
 
+// note JMath tests disabled until this interface is generated from the IMath.h interface
+#if 0
 // From the source, included above (IMath.h) a precompiler will create a method that 
 // can connect a JSONRPC class to the interface implementation. This is typically done 
 // in the constructor of the plugin!
@@ -38,7 +40,8 @@
 // generated and it is named as:
 // <interface name>::Register(PluginHost::JSONRPC& handler, <interface name>* implementation);
 // <interface name>::Unregister(PluginHost::JSONRPC& handler);
-#include <interfaces/JMath.h>
+#include <interfaces/json/JMath.h>
+#endif
 
 namespace WPEFramework {
 
@@ -303,7 +306,7 @@ namespace Plugin {
                     }
                     message->Result = result;
                 } else {
-                    TRACE_L1("Unknown method");
+                    TRACE(Trace::Error, (_T("Unknown method")));
                 }
 
                 message->Parameters.Clear();
@@ -576,6 +579,12 @@ namespace Plugin {
             Core::ProxyType<Core::IDispatch> job(Core::ProxyType<Callback>::Create(this, connection));
             Core::IWorkerPool::Instance().Schedule(Core::Time::Now().Add(seconds * 1000), job);
         }
+        uint32_t checkvalidation(Core::JSON::String& response)
+        {
+            response.SetQuoted(true);
+            response = "Passed Validation";
+            return (Core::ERROR_NONE);
+        }
 
         // Methods for performance measurements
         uint32_t send(const Data::JSONDataBuffer& data, Core::JSON::DecUInt32& result) 
@@ -622,21 +631,22 @@ namespace Plugin {
 
     public:
         JSONRPCPlugin();
-        virtual ~JSONRPCPlugin();
+        ~JSONRPCPlugin() override;
 
         // Build QueryInterface implementation, specifying all possible interfaces to be returned.
         BEGIN_INTERFACE_MAP(JSONRPCPlugin)
         INTERFACE_ENTRY(PluginHost::IPlugin)
         INTERFACE_ENTRY(PluginHost::IDispatcher)
         INTERFACE_ENTRY(Exchange::IPerformance)
+        INTERFACE_ENTRY(Exchange::IMath)
         END_INTERFACE_MAP
 
     public:
         //   IPlugin methods
         // -------------------------------------------------------------------------------------------------------
-        virtual const string Initialize(PluginHost::IShell* service) override;
-        virtual void Deinitialize(PluginHost::IShell* service) override;
-        virtual string Information() const override;
+        const string Initialize(PluginHost::IShell* service) override;
+        void Deinitialize(PluginHost::IShell* service) override;
+        string Information() const override;
 
         //   Private methods specific to this class.
         // -------------------------------------------------------------------------------------------------------
@@ -654,6 +664,9 @@ namespace Plugin {
         // -------------------------------------------------------------------------------------------------------
         uint32_t Add(const uint16_t A, const uint16_t B, uint16_t& sum /* @out */)  const override;
         uint32_t Sub(const uint16_t A, const uint16_t B, uint16_t& sum /* @out */)  const override;
+
+    private:
+        bool Validation(const string& token, const string& method, const string& parameters);
 
     private:
         Core::ProxyType<PeriodicSync> _job;

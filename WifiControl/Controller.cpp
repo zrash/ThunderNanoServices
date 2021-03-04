@@ -31,11 +31,10 @@ ENUM_CONVERSION_BEGIN(WPASupplicant::Controller::events)
     { WPASupplicant::Controller::CTRL_EVENT_BSS_REMOVED, _TXT("CTRL-EVENT-BSS-REMOVED") },
     { WPASupplicant::Controller::CTRL_EVENT_TERMINATING, _TXT("CTRL-EVENT-TERMINATING") },
     { WPASupplicant::Controller::CTRL_EVENT_NETWORK_NOT_FOUND, _TXT("CTRL-EVENT-NETWORK-NOT-FOUND") },
-    { WPASupplicant::Controller::CTRL_EVENT_NETWORK_CHANGED, _TXT("CTRL-EVENT-NETWORK-CHANGED") },
+    { WPASupplicant::Controller::CTRL_EVENT_SSID_TEMP_DISABLED, _TXT("CTRL-EVENT-SSID-TEMP-DISABLED") },
     { WPASupplicant::Controller::WPS_AP_AVAILABLE, _TXT("WPS-AP-AVAILABLE") },
     { WPASupplicant::Controller::AP_ENABLED, _TXT("AP-ENABLED") },
     { WPASupplicant::Controller::CTRL_EVENT_SCAN_FAILED, _TXT("CTRL-EVENT-SCAN-FAILED") },
-    { WPASupplicant::Controller::CTRL_EVENT_OK, _TXT("CTRL-EVENT-OK") },
 
 ENUM_CONVERSION_END(WPASupplicant::Controller::events);
 
@@ -43,7 +42,7 @@ namespace WPASupplicant {
 
     static const TCHAR hexArray[] = "0123456789abcdef";
 
-    class EXTERNAL Communication {
+    class Communication {
     private:
         Communication(const Communication& a_Copy) = delete;
         Communication& operator=(const Communication& a_RHS) = delete;
@@ -223,15 +222,50 @@ namespace WPASupplicant {
             if (event.IsSet() == true) {
                 TRACE(Communication, (_T("Dispatch message: [%s]"), message.c_str()));
 
-                if ((event == CTRL_EVENT_CONNECTED) || (event == CTRL_EVENT_DISCONNECTED) || (event == WPS_AP_AVAILABLE)) {
-                     _adminLock.Lock();
-                    if (_statusRequest.Set() == true) {
-                        _statusRequest.Event(event.Value());
-                        _adminLock.Unlock();
-                        Submit(&_statusRequest);
-                    } else {
-                        _adminLock.Unlock();
+                if (event == CTRL_EVENT_DISCONNECTED) {
+
+                    _statusRequest.Reset();
+
+                    ASSERT(position != string::npos);
+
+                    Core::TextFragment infoLine(message, position, message.length() - position);
+
+                    // Skip white space
+                    uint16_t begin = infoLine.ForwardSkip(_T(" \t"), 0);
+
+                    // Skip bssid=<value> sub-string
+                    begin = infoLine.ForwardFind(_T(" \t"), begin);
+
+                    // Skip white space & get begin position of reason string
+                    begin = infoLine.ForwardSkip(_T(" \t"), begin);
+
+                    // Get end position of reason string
+                    uint16_t end = infoLine.ForwardFind(_T("=\t"), begin);
+
+                    // Get and check if it is a reason string
+                    string reasonStr(Core::TextFragment(infoLine, begin, (end - begin)).Text());
+                    if (reasonStr.compare("reason") == 0) {
+
+                        // Skip '=' character & get begin position of reason code
+                        begin = infoLine.ForwardSkip(_T("=\t"), end);
+
+                        // Get end position of reason code
+                        end = infoLine.ForwardFind(_T(" \t"), begin);
+
+                        // Get reason code
+                        uint32_t reason = Core::NumberType<uint32_t>(Core::TextFragment(infoLine, begin, (end - begin)));
+
+                        _statusRequest.DisconnectReason(static_cast<reasons>(reason));
                     }
+                    else {
+                        TRACE(Trace::Warning, ("There is no reason code in the event"));
+                    }
+                    _statusRequest.Event(event.Value());
+                    Submit(&_statusRequest);
+                }
+                else if ((event == CTRL_EVENT_CONNECTED) || (event == WPS_AP_AVAILABLE)) {
+                    _statusRequest.Event(event.Value());
+                    Submit(&_statusRequest);
                 } else if (event == CTRL_EVENT_SCAN_STARTED) {
                     // if it is already set then scan started by us in Scan() otherwise intiiated by supplicant e.g. Scan during Connect OR autoscan
                     _scanning = true;
@@ -275,7 +309,6 @@ namespace WPASupplicant {
                         NetworkInfo newEntry;
                         _networks[bssid] = newEntry;
                     } else if (event == CTRL_EVENT_BSS_REMOVED) {
-
                         ++_removed;
                         NetworkInfoContainer::iterator network(_networks.find(bssid));
 
@@ -284,6 +317,9 @@ namespace WPASupplicant {
                         }
                     }
                     _adminLock.Unlock();
+                }
+                else if ((event == CTRL_EVENT_SSID_TEMP_DISABLED) || (event == CTRL_EVENT_NETWORK_NOT_FOUND)) {
+                    Notify(event.Value());
                 }
             } else {
                 TRACE(Communication, (_T("RAW EVENT MESSAGE: [%s]"), message.c_str()));
@@ -303,7 +339,7 @@ namespace WPASupplicant {
 
                 Trigger();
             } else {
-                TRACE(Trace::Error, ("There is no pending request to process"));
+                TRACE(Trace::Information, ("There is no pending request to process"));
             }
         }
 

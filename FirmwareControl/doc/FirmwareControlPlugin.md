@@ -23,12 +23,12 @@ FirmwareControl plugin for Thunder framework.
 <a name="head.Scope"></a>
 ## Scope
 
-This document describes purpose and functionality of the FirmwareControl plugin. It includes detailed specification of its configuration, methods and properties provided, as well as notifications sent.
+This document describes purpose and functionality of the FirmwareControl plugin. It includes detailed specification about its configuration, methods and properties provided, as well as notifications sent.
 
 <a name="head.Case_Sensitivity"></a>
 ## Case Sensitivity
 
-All identifiers on the interface described in this document are case-sensitive. Thus, unless stated otherwise, all keywords, entities, properties, relations and actions should be treated as such.
+All identifiers of the interfaces described in this document are case-sensitive. Thus, unless stated otherwise, all keywords, entities, properties, relations and actions should be treated as such.
 
 <a name="head.Acronyms,_Abbreviations_and_Terms"></a>
 ## Acronyms, Abbreviations and Terms
@@ -61,7 +61,7 @@ The table below provides and overview of terms and abbreviations used in this do
 <a name="head.Description"></a>
 # Description
 
-Control Firmware upgrade to the device
+Control Firmware upgrade to the device.
 
 The plugin is designed to be loaded and executed within the Thunder framework. For more information about the framework refer to [[Thunder](#ref.Thunder)].
 
@@ -75,7 +75,11 @@ The table below lists configuration options of the plugin.
 | callsign | string | Plugin instance name (default: *FirmwareControl*) |
 | classname | string | Class name: *FirmwareControl* |
 | locator | string | Library name: *libWPEFrameworkFirmwareControl.so* |
-| autostart | boolean | Determines if the plugin is to be started automatically along with the framework |
+| autostart | boolean | Determines if the plugin shall be started automatically along with the framework |
+| configuration | object | <sup>*(optional)*</sup>  |
+| configuration?.source | string | <sup>*(optional)*</sup> Source URL or location of the firmware |
+| configuration?.download | string | <sup>*(optional)*</sup> Location where the firmware to be downloaded |
+| configuration?.waittime | number | <sup>*(optional)*</sup> Maximum duration to finish download or install process |
 
 <a name="head.Methods"></a>
 # Methods
@@ -87,11 +91,13 @@ FirmwareControl interface methods:
 | Method | Description |
 | :-------- | :-------- |
 | [upgrade](#method.upgrade) | Upgrade the device to the given firmware |
+| [resume](#method.resume) | Resume download from the last paused position |
+
 
 <a name="method.upgrade"></a>
 ## *upgrade <sup>method</sup>*
 
-Upgrade the device to the given firmware.
+Upgrade the device to the given firmware. (Note: Ensure size of firmware image should be < 500MB).
 
 Also see: [upgradeprogress](#event.upgradeprogress)
 
@@ -100,10 +106,10 @@ Also see: [upgradeprogress](#event.upgradeprogress)
 | Name | Type | Description |
 | :-------- | :-------- | :-------- |
 | params | object |  |
-| params.name | string | name of the firmware |
-| params?.location | string | <sup>*(optional)*</sup> location/url of the firmware to be upgraded |
-| params?.type | string | <sup>*(optional)*</sup> type of the firmware (must be one of the following: *CDL*, *RCDL*) |
-| params?.progressinterval | number | <sup>*(optional)*</sup> number of seconds between progress update events (5 secoonds, 10 seconds etc). 0 means invoking callback only once to report final upgrade result |
+| params.name | string | Name of the firmware |
+| params?.location | string | <sup>*(optional)*</sup> Location or URL of the firmware to be upgraded |
+| params?.type | string | <sup>*(optional)*</sup> Type of the firmware (must be one of the following: *CDL*, *RCDL*) |
+| params?.progressinterval | number | <sup>*(optional)*</sup> Number of seconds between progress update events (5 seconds, 10 seconds etc). 0 means invoking callback only once to report final upgrade result |
 | params?.hmac | string | <sup>*(optional)*</sup> HMAC value of firmare |
 
 ### Result
@@ -120,7 +126,6 @@ Also see: [upgradeprogress](#event.upgradeprogress)
 | 15 | ```ERROR_INCORRECT_URL``` | Invalid location given |
 | 2 | ```ERROR_UNAVAILABLE``` | Error in download |
 | 30 | ```ERROR_BAD_REQUEST``` | Bad file name given |
-| 22 | ```ERROR_UNKNOWN_KEY``` | Bad hash value given |
 | 5 | ```ERROR_ILLEGAL_STATE``` | Invalid state of device |
 | 14 | ```ERROR_INCORRECT_HASH``` | Incorrect hash given |
 
@@ -136,12 +141,13 @@ Also see: [upgradeprogress](#event.upgradeprogress)
     "params": {
         "name": "firmware_v.0",
         "location": "http://my.site.com/images",
-        "type": "CDL",
+        "type": "RCDL",
         "progressinterval": 10,
         "hmac": "2834e6d07fa4c7778ef7a4e394f38a5c321afbed51d54ad512bd3fffbc7aa5debc"
     }
 }
 ```
+
 #### Response
 
 ```json
@@ -151,6 +157,64 @@ Also see: [upgradeprogress](#event.upgradeprogress)
     "result": null
 }
 ```
+
+<a name="method.resume"></a>
+## *resume <sup>method</sup>*
+
+Resume download from the last paused position.
+
+Also see: [upgradeprogress](#event.upgradeprogress)
+
+### Parameters
+
+| Name | Type | Description |
+| :-------- | :-------- | :-------- |
+| params | object |  |
+| params.name | string | Name of the firmware |
+| params?.location | string | <sup>*(optional)*</sup> Location or URL of the firmware to be upgraded |
+
+### Result
+
+| Name | Type | Description |
+| :-------- | :-------- | :-------- |
+| result | null | Always null |
+
+### Errors
+
+| Code | Message | Description |
+| :-------- | :-------- | :-------- |
+| 12 | ```ERROR_INPROGRESS``` | Operation in progress |
+| 15 | ```ERROR_INCORRECT_URL``` | Invalid location given |
+| 2 | ```ERROR_UNAVAILABLE``` | Error in download |
+| 30 | ```ERROR_BAD_REQUEST``` | Bad file name given |
+| 5 | ```ERROR_ILLEGAL_STATE``` | Invalid state of device |
+
+### Example
+
+#### Request
+
+```json
+{
+    "jsonrpc": "2.0",
+    "id": 1234567890,
+    "method": "FirmwareControl.1.resume",
+    "params": {
+        "name": "firmware_v.0",
+        "location": "http://my.site.com/images"
+    }
+}
+```
+
+#### Response
+
+```json
+{
+    "jsonrpc": "2.0",
+    "id": 1234567890,
+    "result": null
+}
+```
+
 <a name="head.Properties"></a>
 # Properties
 
@@ -161,6 +225,8 @@ FirmwareControl interface properties:
 | Property | Description |
 | :-------- | :-------- |
 | [status](#property.status) <sup>RO</sup> | Current status of a upgrade |
+| [downloadsize](#property.downloadsize) <sup>RO</sup> | Max free space available to download image |
+
 
 <a name="property.status"></a>
 ## *status <sup>property</sup>*
@@ -175,7 +241,7 @@ Also see: [upgradeprogress](#event.upgradeprogress)
 
 | Name | Type | Description |
 | :-------- | :-------- | :-------- |
-| (property) | string | upgrade status (must be one of the following: *none*, *upgradestarted*, *downloadstarted*, *downloadaborted*, *downloadcompleted*, *installnotstarted*, *installaborted*, *installstarted*, *upgradecompleted*, *upgradecancelled*) |
+| (property) | string | Upgrade status (must be one of the following: *none*, *upgradestarted*, *downloadstarted*, *downloadaborted*, *downloadcompleted*, *installinitiated*, *installnotstarted*, *installaborted*, *installstarted*, *upgradecompleted*, *upgradecancelled*) |
 
 ### Example
 
@@ -188,6 +254,7 @@ Also see: [upgradeprogress](#event.upgradeprogress)
     "method": "FirmwareControl.1.status"
 }
 ```
+
 #### Get Response
 
 ```json
@@ -197,10 +264,46 @@ Also see: [upgradeprogress](#event.upgradeprogress)
     "result": "completed"
 }
 ```
+
+<a name="property.downloadsize"></a>
+## *downloadsize <sup>property</sup>*
+
+Provides access to the max free space available to download image.
+
+> This property is **read-only**.
+
+### Value
+
+| Name | Type | Description |
+| :-------- | :-------- | :-------- |
+| (property) | number | Available free space in bytes |
+
+### Example
+
+#### Get Request
+
+```json
+{
+    "jsonrpc": "2.0",
+    "id": 1234567890,
+    "method": "FirmwareControl.1.downloadsize"
+}
+```
+
+#### Get Response
+
+```json
+{
+    "jsonrpc": "2.0",
+    "id": 1234567890,
+    "result": 315576
+}
+```
+
 <a name="head.Notifications"></a>
 # Notifications
 
-Notifications are autonomous events, triggered by the internals of the plugin, and broadcasted via JSON-RPC to all registered observers. Refer to [[Thunder](#ref.Thunder)] for information on how to register for a notification.
+Notifications are autonomous events, triggered by the internals of the implementation, and broadcasted via JSON-RPC to all registered observers. Refer to [[Thunder](#ref.Thunder)] for information on how to register for a notification.
 
 The following events are provided by the FirmwareControl plugin:
 
@@ -209,6 +312,7 @@ FirmwareControl interface events:
 | Event | Description |
 | :-------- | :-------- |
 | [upgradeprogress](#event.upgradeprogress) | Notifies progress of upgrade |
+
 
 <a name="event.upgradeprogress"></a>
 ## *upgradeprogress <sup>event</sup>*
@@ -220,9 +324,9 @@ Notifies progress of upgrade.
 | Name | Type | Description |
 | :-------- | :-------- | :-------- |
 | params | object |  |
-| params.status | string | upgrade status (must be one of the following: *none*, *upgradestarted*, *downloadstarted*, *downloadaborted*, *downloadcompleted*, *installnotstarted*, *installaborted*, *installstarted*, *upgradecompleted*, *upgradecancelled*) |
-| params.error | string | reason of error (must be one of the following: *none*, *generic*, *invalidparameters*, *invalidstate*, *operationotsupported*, *incorrecthash*, *unavailable*, *timedout*, *unkown*) |
-| params.percentage | number |  |
+| params.status | string | Upgrade status (must be one of the following: *none*, *upgradestarted*, *downloadstarted*, *downloadaborted*, *downloadcompleted*, *installinitiated*, *installnotstarted*, *installaborted*, *installstarted*, *upgradecompleted*, *upgradecancelled*) |
+| params.error | string | Reason of error (must be one of the following: *none*, *generic*, *invalidparameters*, *invalidstate*, *noenoughspace*, *operationotsupported*, *incorrecthash*, *unauthenticated*, *unavailable*, *timedout*, *downloaddirectorynotexist*, *resumenotsupported*, *invalidrange*, *unkown*) |
+| params.progress | number | Progress of upgrade (number of bytes transferred during download or percentage of completion during install |
 
 ### Example
 
@@ -233,7 +337,8 @@ Notifies progress of upgrade.
     "params": {
         "status": "completed",
         "error": "operationotsupported",
-        "percentage": 89
+        "progress": 89
     }
 }
 ```
+

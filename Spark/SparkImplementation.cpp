@@ -374,7 +374,7 @@ namespace Plugin {
 
                     if (length >= (sizeof(buffer) - sizeof(prefix))) {
 
-                        SYSLOG(Trace::Warning, (_T("URL size greater than 8000 bytes, so resetting url to browser.js")));
+                        SYSLOG(Logging::Notification, (_T("URL size greater than 8000 bytes, so resetting url to browser.js")));
                         ::strcat(buffer, _T("browser.js"));
                     } else {
                         strncat(buffer, url.c_str(), length);
@@ -545,11 +545,11 @@ namespace Plugin {
                 EXITSCENELOCK();
             }
 
-            virtual void onChar(uint32_t c) override
+            virtual void onChar(uint32_t character) override
             {
                 ENTERSCENELOCK();
                 if (_view != nullptr) {
-                    _view->onChar(c);
+                    _view->onChar(character);
                 }
                 EXITSCENELOCK();
             }
@@ -610,7 +610,7 @@ namespace Plugin {
             }
 
         private:
-            virtual bool Initialize()
+            uint32_t Initialize() override
             {
                 script.init();
                 pxWindow::init(0, 0, _width, _height);
@@ -623,7 +623,7 @@ namespace Plugin {
                 sprintf(buffer, "Spark: %s", PX_SCENE_VERSION);
                 setTitle(buffer);
 
-                return true;
+                return (Core::ERROR_NONE);
             }
             virtual uint32_t Worker()
             {

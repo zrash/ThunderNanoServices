@@ -42,14 +42,14 @@ namespace Plugin
 
     WifiControl::WifiControl()
         : _skipURL(0)
+        , _retryInterval(0)
         , _service(nullptr)
         , _configurationStore()
         , _sink(*this)
         , _wpaSupplicant()
         , _controller()
-        , _wifiConnector(this, 120)
-        , _autoConnect(false)
-        , _preferredSsid("Initial")
+        , _autoConnect(_controller)
+        , _autoConnectEnabled(false)
     {
         RegisterAll();
     }
@@ -66,14 +66,12 @@ namespace Plugin
         _skipURL = static_cast<uint8_t>(service->WebPrefix().length());
         _service = service;
 
-        _autoConnect = config.AutoConnect.Value();
-
         if (Core::Directory(service->PersistentPath().c_str()).CreatePath())
             _configurationStore = service->PersistentPath() + "wpa_supplicant.conf";
         else
             SYSLOG(Logging::Startup, ("Config directory %s doesn't exist and could not be created!\n", service->PersistentPath().c_str()));
 
-        TRACE_L1("Starting the application for wifi called: [%s]", config.Application.Value().c_str());
+        TRACE(Trace::Information, (_T("Starting the application for wifi called: [%s]"), config.Application.Value().c_str()));
 #ifdef USE_WIFI_HAL
         _controller = WPASupplicant::WifiHAL::Create();
         if ((_controller.IsValid() == true) && (_controller->IsOperational() == true)) {
@@ -81,7 +79,7 @@ namespace Plugin
         }
 #else
         if ((config.Application.Value().empty() == false) && (::strncmp(config.Application.Value().c_str(), _TXT("null")) != 0)) {
-            if (_wpaSupplicant.Launch(config.Application.Value(), config.Connector.Value(), config.Interface.Value(), 15) != Core::ERROR_NONE) {
+            if ((Core::Directory(config.Connector.Value().c_str()).CreatePath() != true) || (_wpaSupplicant.Launch(config.Connector.Value(), config.Interface.Value(), 15) != Core::ERROR_NONE)) {
                 result = _T("Could not start WPA_SUPPLICANT");
             }
         }
@@ -119,9 +117,7 @@ namespace Plugin
                         }
                     }
 
-                    if (_autoConnect == true) {
-                        _wifiConnector.Connect();
-                    } else {
+                    if (config.AutoConnect.Value() == false) {
                         _controller->Scan();
                         uint32_t scanInterval = config.ScanInterval.Value() * 1000;
                         if (scanInterval) {
@@ -129,12 +125,17 @@ namespace Plugin
                             _controller->ScheduleScan(scanInterval);
                         }
                     }
+                    else {
+                        _autoConnectEnabled = true;
+                        _retryInterval = config.RetryInterval.Value();
+                        _autoConnect.Connect(config.Preferred.Value(), _retryInterval, ~0);
+                    }
                 }
             }
         }
 #endif
 
-        TRACE_L1("Config path = %s", _configurationStore.c_str());
+        TRACE(Trace::Information, (_T("Config path = %s"), _configurationStore.c_str()));
 
         // On success return empty, to indicate there is no error text.
         return (result);
@@ -143,14 +144,13 @@ namespace Plugin
     /* virtual */ void WifiControl::Deinitialize(PluginHost::IShell * service)
     {
 #ifndef USE_WIFI_HAL
+        _autoConnect.Revoke();
         _controller->Callback(nullptr);
-        if( _wpaSupplicant.WasStarted() == true ) {
         _controller->Terminate();
-            _wpaSupplicant.Terminate();
-        }
         _controller.Release();
-#endif
 
+        _wpaSupplicant.Terminate();
+#endif
         ASSERT(_service == service);
         _service = nullptr;
     }
@@ -179,7 +179,7 @@ namespace Plugin
 
     /* virtual */ Core::ProxyType<Web::Response> WifiControl::Process(const Web::Request& request)
     {
-        TRACE_L1("Web request %s", request.Path.c_str());
+        TRACE(Trace::Information, (_T("Web request %s"), request.Path.c_str()));
         ASSERT(_skipURL <= request.Path.length());
 
         Core::ProxyType<Web::Response> result;
@@ -203,12 +203,52 @@ namespace Plugin
         return result;
     }
 
+    uint8_t WifiControl::GetWPAProtocolFlags(const JsonData::WifiControl::ConfigInfo& settings, const bool safeFallback) {
+        uint8_t protocolFlags = 0;
+
+        switch (settings.Type.Value()) {
+            case JsonData::WifiControl::TypeType::WPA:
+                protocolFlags = WPASupplicant::Config::wpa_protocol::WPA;
+                break;
+            case JsonData::WifiControl::TypeType::WPA2:
+                protocolFlags = WPASupplicant::Config::WPA2;
+                break;
+            case JsonData::WifiControl::TypeType::WPA_WPA2:
+                protocolFlags = WPASupplicant::Config::WPA | WPASupplicant::Config::WPA2;
+                break;
+            default:
+                if (safeFallback) {
+                    protocolFlags = WPASupplicant::Config::WPA | WPASupplicant::Config::WPA2;
+                    TRACE_GLOBAL(Trace::Information, (_T("Unknown WPA protocol type %d. Assuming WPA/WPA2"), settings.Type.Value()));
+                } else {
+                    TRACE_GLOBAL(Trace::Information, (_T("Unknown WPA protocol type %d"), settings.Type.Value()));
+                }
+        }
+
+        return protocolFlags;
+    }
+
+    JsonData::WifiControl::TypeType WifiControl::GetWPAProtocolType(const uint8_t protocolFlags) {
+        JsonData::WifiControl::TypeType result = JsonData::WifiControl::TypeType::UNKNOWN;
+        
+        if (protocolFlags == (WPASupplicant::Config::wpa_protocol::WPA | WPASupplicant::Config::wpa_protocol::WPA2)) {
+            result = JsonData::WifiControl::TypeType::WPA_WPA2;
+        } else if ((protocolFlags & WPASupplicant::Config::wpa_protocol::WPA2) != 0) {
+            result = JsonData::WifiControl::TypeType::WPA2;
+        } else if ((protocolFlags & WPASupplicant::Config::wpa_protocol::WPA) != 0) {
+            result = JsonData::WifiControl::TypeType::WPA;
+        } 
+
+        return result;
+    }
+    
     Core::ProxyType<Web::Response> WifiControl::GetMethod(Core::TextSegmentIterator & index)
     {
         Core::ProxyType<Web::Response> result(PluginHost::IFactories::Instance().Response());
         result->ErrorCode = Web::STATUS_BAD_REQUEST;
         result->Message = _T("Unsupported GET request.");
 
+        if (index.IsValid() == true) {
             if (index.Next() && index.IsValid()) {
                 if (index.Current().Text() == _T("Networks")) {
 
@@ -257,6 +297,7 @@ namespace Plugin
 
                 result->Body(status);
         }
+        }
 
         return result;
     }
@@ -278,10 +319,14 @@ namespace Plugin
 
                         WPASupplicant::Config settings(_controller->Create(SSIDDecode(config->Ssid.Value())));
 
-                        UpdateConfig(settings, *config);
-
-                        result->ErrorCode = Web::STATUS_OK;
-                        result->Message = _T("Config set.");
+                        if (UpdateConfig(settings, *config) == true) {
+                           result->ErrorCode = Web::STATUS_OK;
+                           result->Message = _T("Config set.");
+                        } else {
+                           _controller->Destroy(SSIDDecode(config->Ssid.Value()));
+                           result->ErrorCode = Web::STATUS_BAD_REQUEST;
+                           result->Message = _T("Incomplete Config.");
+                        }
                     }
                 } else if (index.Current().Text() == _T("Scan")) {
 
@@ -294,23 +339,16 @@ namespace Plugin
                         result->ErrorCode = Web::STATUS_OK;
                         result->Message = _T("Connect started.");
 
-                        _controller->Connect(SSIDDecode(index.Current().Text()));
+                        Connect(SSIDDecode(index.Current().Text()));
                     }
                 } else if (index.Current().Text() == _T("Store")) {
-                    Core::File configFile(_configurationStore);
 
-                    if (configFile.Create() != true) {
+                    if (Store() != Core::ERROR_NONE) {
                         result->ErrorCode = Web::STATUS_BAD_REQUEST;
                         result->Message = _T("Could not store the information.");
-
                     } else {
                         result->ErrorCode = Web::STATUS_OK;
                         result->Message = _T("Store started.");
-
-                        WifiControl::ConfigList configs;
-                        WPASupplicant::Config::Iterator list(_controller->Configs());
-                        configs.Set(list);
-                        configs.IElement::ToFile(configFile);
                     }
 
                 } else if ((index.Current().Text() == _T("Debug")) && (index.Next() == true)) {
@@ -345,10 +383,14 @@ namespace Plugin
                     result->Message = _T("Config key not found.");
                 } else {
 
-                    UpdateConfig(settings, *config);
-
-                    result->ErrorCode = Web::STATUS_OK;
-                    result->Message = _T("Config set.");
+                    if (UpdateConfig(settings, *config) == true) {
+                        result->ErrorCode = Web::STATUS_OK;
+                        result->Message = _T("Config set.");
+                    } else {
+                        _controller->Destroy(SSIDDecode(config->Ssid.Value()));
+                        result->ErrorCode = Web::STATUS_BAD_REQUEST;
+                        result->Message = _T("Incomplete Config.");
+                    }
                 }
             }
         }
@@ -374,7 +416,7 @@ namespace Plugin
                     if (index.Next() == true) {
                         result->ErrorCode = Web::STATUS_OK;
                         result->Message = _T("Disconnected.");
-                        _controller->Disconnect(SSIDDecode(index.Current().Text()));
+                        Disconnect(SSIDDecode(index.Current().Text()));
                     }
                 }
             }
@@ -395,6 +437,8 @@ namespace Plugin
 
             networks.Set(list);
 
+            _autoConnect.Scanned();
+
             event_scanresults(networks.Networks);
 
             string message;
@@ -402,27 +446,19 @@ namespace Plugin
             networks.ToString(message);
 
             _service->Notify(message);
-            if (_autoConnect == true) {
-                _wifiConnector.Scanned();
-            }
             break;
         }
         case WPASupplicant::Controller::CTRL_EVENT_CONNECTED: {
             string message("{ \"event\": \"Connected\", \"ssid\": \"" + _controller->Current() + "\" }");
             _service->Notify(message);
             event_connectionchange(_controller->Current());
-            if (_autoConnect == true) {
-                _wifiConnector.Reset();
-            }
             break;
         }
         case WPASupplicant::Controller::CTRL_EVENT_DISCONNECTED: {
             string message("{ \"event\": \"Disconnected\" }");
             _service->Notify(message);
             event_connectionchange(string());
-            if (_autoConnect == true) {
-                _wifiConnector.Disconnected();
-            }
+            _autoConnect.Disconnected();
             break;
         }
         case WPASupplicant::Controller::CTRL_EVENT_NETWORK_CHANGED: {
@@ -436,13 +472,9 @@ namespace Plugin
         case WPASupplicant::Controller::CTRL_EVENT_TERMINATING:
         case WPASupplicant::Controller::CTRL_EVENT_NETWORK_NOT_FOUND:
         case WPASupplicant::Controller::CTRL_EVENT_SCAN_STARTED:
+        case WPASupplicant::Controller::CTRL_EVENT_SSID_TEMP_DISABLED:
         case WPASupplicant::Controller::WPS_AP_AVAILABLE:
         case WPASupplicant::Controller::AP_ENABLED:
-            break;
-        case WPASupplicant::Controller::CTRL_EVENT_OK:
-            if (_autoConnect == true) {
-                _wifiConnector.OKReceived();
-            }
             break;
         }
     }

@@ -17,10 +17,10 @@
  * limitations under the License.
  */
  
+#include "Module.h"
 #include <interfaces/json/JsonData_Browser.h>
 #include <interfaces/json/JsonData_StateControl.h>
 #include "Cobalt.h"
-#include "Module.h"
 
 namespace WPEFramework {
 namespace Plugin {
@@ -41,6 +41,9 @@ void Cobalt::RegisterAll() {
     Property < Core::JSON::EnumType
             < StateType
                     >> (_T("state"), &Cobalt::get_state, &Cobalt::set_state, this); /* StateControl */
+    Register<DeleteParamsData,void>(_T("delete"), &Cobalt::endpoint_delete, this);
+    Property < Core::JSON::String
+            > (_T("deeplink"), nullptr, &Cobalt::set_deeplink, this); /* Application */
 }
 
 void Cobalt::UnregisterAll() {
@@ -48,6 +51,8 @@ void Cobalt::UnregisterAll() {
     Unregister(_T("fps"));
     Unregister(_T("visibility"));
     Unregister(_T("url"));
+    Unregister(_T("delete"));
+    Unregister(_T("deeplink"));
 }
 
 // API implementation
@@ -83,8 +88,11 @@ uint32_t Cobalt::set_url(const Core::JSON::String &param) /* Browser */
 //  - ERROR_NONE: Success
 uint32_t Cobalt::get_visibility(
         Core::JSON::EnumType<VisibilityType> &response) const /* Browser */ {
+    /*
     response = (_hidden ? VisibilityType::HIDDEN : VisibilityType::VISIBLE);
     return Core::ERROR_NONE;
+    */
+    return Core::ERROR_UNAVAILABLE;
 }
 
 // Property: visibility - Current browser visibility
@@ -92,9 +100,9 @@ uint32_t Cobalt::get_visibility(
 //  - ERROR_NONE: Success
 uint32_t Cobalt::set_visibility(
         const Core::JSON::EnumType<VisibilityType> &param) /* Browser */ {
+    /*
     ASSERT(_cobalt != nullptr);
     uint32_t result = Core::ERROR_BAD_REQUEST;
-
     if (param.IsSet()) {
         if (param == VisibilityType::VISIBLE) {
             _cobalt->Hide(true);
@@ -104,6 +112,8 @@ uint32_t Cobalt::set_visibility(
         result = Core::ERROR_NONE;
     }
     return result;
+    */
+    return Core::ERROR_UNAVAILABLE;
 }
 
 // Property: fps - Current number of frames per second the browser is rendering
@@ -153,6 +163,30 @@ uint32_t Cobalt::set_state(const Core::JSON::EnumType<StateType> &param) /* Stat
 
             stateControl->Release();
         }
+        result = Core::ERROR_NONE;
+    }
+    return result;
+}
+
+// Method: endpoint_delete - delete dir
+// Return codes:
+//  - ERROR_NONE: Success
+//  - ERROR_UNKNOWN_KEY: The given path was incorrect
+uint32_t Cobalt::endpoint_delete(const DeleteParamsData& params)
+{
+    return DeleteDir(params.Path.Value());
+}
+
+// Property: deeplink - ContentLink loaded in the browser
+// Return codes:
+//  - ERROR_NONE: Success
+//  - ERROR_INCORRECT_URL: Incorrect ContentLink given
+uint32_t Cobalt::set_deeplink(const Core::JSON::String &param) /* Application */
+{
+    ASSERT(_application != nullptr);
+    uint32_t result = Core::ERROR_INCORRECT_URL;
+    if (param.IsSet() && !param.Value().empty()) {
+        _application->ContentLink(param.Value());
         result = Core::ERROR_NONE;
     }
     return result;

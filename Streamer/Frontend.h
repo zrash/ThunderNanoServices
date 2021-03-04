@@ -234,7 +234,6 @@ namespace Player {
                 IControl::ICallback* _callback;
             };
 
-
         public:
             Frontend(Administrator* administration, IPlayerPlatform* player)
                 : _refCount(1)
@@ -258,7 +257,7 @@ namespace Player {
                 ReleaseElements();
 
                 if (_decoder != nullptr) {
-                    TRACE_L1("Forcefull destruction of a stream. Forcefully removing decoder: %d", __LINE__);
+                    TRACE(Trace::Information, (_T("Forcefull destruction of a stream. Forcefully removing decoder: %d"), __LINE__));
                     delete _decoder;
                 }
             }
@@ -354,6 +353,32 @@ namespace Player {
                 }
                 _callback = callback;
                 _adminLock.Unlock();
+            }
+            void Attach(IStream::ICallback* callback) override
+            {
+                _adminLock.Lock();
+
+                if (callback != nullptr && _callback == nullptr) {
+                    callback->AddRef();
+                    _callback = callback;
+                }
+
+                _adminLock.Unlock();
+            }
+            uint32_t Detach(IStream::ICallback* callback) override
+            {
+                uint32_t result = Core::ERROR_NONE;
+                
+                _adminLock.Lock();
+
+                if (_callback != nullptr && _callback == callback) {
+                    result = callback->Release();
+                    _callback = nullptr;
+                }
+
+                _adminLock.Unlock();
+
+                return result;
             }
             state State() const override
             {
@@ -501,4 +526,3 @@ namespace Player {
 } // Player
 
 }
-

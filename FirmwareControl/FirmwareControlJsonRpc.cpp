@@ -33,12 +33,16 @@ namespace Plugin {
     void FirmwareControl::RegisterAll()
     {
         Register<UpgradeParamsData,void>(_T("upgrade"), &FirmwareControl::endpoint_upgrade, this);
+        Register<ResumeParamsData,void>(_T("resume"), &FirmwareControl::endpoint_resume, this);
         Property<Core::JSON::EnumType<StatusType>>(_T("status"), &FirmwareControl::get_status, nullptr, this);
+        Property<Core::JSON::DecUInt64>(_T("downloadsize"), &FirmwareControl::get_downloadsize, nullptr, this);
     }
 
     void FirmwareControl::UnregisterAll()
     {
+        Unregister(_T("resume"));
         Unregister(_T("upgrade"));
+        Unregister(_T("downloadsize"));
         Unregister(_T("status"));
     }
 
@@ -52,7 +56,6 @@ namespace Plugin {
     //  - ERROR_INCORRECT_URL: Invalid location given
     //  - ERROR_UNAVAILABLE: Error in download
     //  - ERROR_BAD_REQUEST: Bad file name given
-    //  - ERROR_UNKNOWN_KEY: Bad hash value given
     //  - ERROR_ILLEGAL_STATE: Invalid state of device
     //  - ERROR_INCORRECT_HASH: Incorrect hash given
     uint32_t FirmwareControl::endpoint_upgrade(const UpgradeParamsData& params)
@@ -104,7 +107,7 @@ namespace Plugin {
                     }
                     if (result == Core::ERROR_NONE) {
                         TRACE(Trace::Information, (_T("Scheduling the upgrade \n")));
-                        result = Schedule(name, locator, type, progressInterval, hash);
+                        result = Schedule(name, locator, type, progressInterval, hash, false);
                     }
       
                 } else {
@@ -122,6 +125,60 @@ namespace Plugin {
         return result;
     }
 
+    // Method: resume - Resume download from the last paused position"
+    // Return codes:
+    //  - ERROR_NONE: Success
+    //  - ERROR_INPROGRESS: Operation in progress
+    //  - ERROR_INCORRECT_URL: Invalid location given
+    //  - ERROR_UNAVAILABLE: Error in download
+    //  - ERROR_BAD_REQUEST: Bad file name given
+    //  - ERROR_ILLEGAL_STATE: Invalid state of device
+    uint32_t FirmwareControl::endpoint_resume(const ResumeParamsData& params)
+    {
+        TRACE(Trace::Information, (string(__FUNCTION__)));
+
+        uint32_t result = Core::ERROR_NONE;
+        const string& name = params.Name.Value();
+
+        _adminLock.Lock();
+        UpgradeStatus upgradeStatus = _upgradeStatus;
+        _adminLock.Unlock();
+
+        TRACE(Trace::Information, (_T("status = [%s] \n"), Core::EnumerateType<JsonData::FirmwareControl::StatusType>(upgradeStatus).Data()));
+
+        if (upgradeStatus == UpgradeStatus::NONE) {
+            if (result == Core::ERROR_NONE) {
+                if (name.empty() != true) {
+
+                    _adminLock.Lock();
+                    _upgradeStatus = UPGRADE_STARTED;
+                    _adminLock.Unlock();
+
+                    string locator = _source;
+                    if (params.Location.IsSet() == true) {
+                        locator = params.Location.Value();
+                    }
+                    TRACE(Trace::Information, (_T("Image = [%s/%s]\n"), locator.c_str(), name.c_str()));
+
+                    if (result == Core::ERROR_NONE) {
+                        TRACE(Trace::Information, (_T("Scheduling the upgrade \n")));
+                        result = Schedule(name, locator);
+                    }
+                } else {
+                    result = Core::ERROR_BAD_REQUEST;
+                }
+            }
+        } else {
+            result = Core::ERROR_INPROGRESS;
+        }
+
+        if ((result != Core::ERROR_NONE) && (result != Core::ERROR_INPROGRESS)) {
+            ResetStatus();
+        }
+        TRACE(Trace::Information, (_T("Status of resume request = %d\n"), result));
+        return result;
+    }
+
     // Property: status - Current status of a upgrade
     // Return codes:
     //  - ERROR_NONE: Success
@@ -135,18 +192,28 @@ namespace Plugin {
         return Core::ERROR_NONE;
     }
 
+    // Property: downloadsize - Max free space available to download image
+    // Return codes:
+    //  - ERROR_NONE: Success
+    uint32_t FirmwareControl::get_downloadsize(Core::JSON::DecUInt64& response) const
+    {
+        response = DownloadMaxSize();
+
+        return Core::ERROR_NONE;
+    }
+
     // Event: upgradeprogress - Notifies progress of upgrade
-    void FirmwareControl::event_upgradeprogress(const StatusType& status, const UpgradeprogressParamsData::ErrorType& error, const uint16_t& percentage)
+    void FirmwareControl::event_upgradeprogress(const StatusType& status, const UpgradeprogressParamsData::ErrorType& error, const uint32_t& progress)
     {
         UpgradeprogressParamsData params;
         params.Status = status;
         params.Error = error;
-        params.Percentage = percentage;
+        params.Progress = progress;
 
-        TRACE(Trace::Information, (_T("status = [%s] error = [%s] percentage = [%d]\n"),
+        TRACE(Trace::Information, (_T("status = [%s] error = [%s] progress = [%d]\n"),
               Core::EnumerateType<JsonData::FirmwareControl::StatusType>(status).Data(),
               Core::EnumerateType<JsonData::FirmwareControl::UpgradeprogressParamsData::ErrorType>(error).Data(),
-              percentage));
+              progress));
         Notify(_T("upgradeprogress"), params);
     }
 

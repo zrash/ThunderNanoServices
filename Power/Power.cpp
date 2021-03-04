@@ -39,6 +39,7 @@ namespace Plugin {
     /* virtual */ const string Power::Initialize(PluginHost::IShell* service)
     {
         string message;
+        WPEFramework::Exchange::IPower::PCState persistedState = power_get_persisted_state();
 
         ASSERT(_service == nullptr);
 
@@ -64,7 +65,7 @@ namespace Plugin {
         // Receive all plugin information on state changes.
         _service->Register(&_sink);
 
-        power_initialize(PowerStateChange, this, _service->ConfigLine().c_str());
+        power_initialize(PowerStateChange, this, _service->ConfigLine().c_str(), persistedState);
 
         return message;
     }
@@ -193,9 +194,9 @@ namespace Plugin {
         uint32_t result = Core::ERROR_ILLEGAL_STATE;
 
         if (power_get_state() == state) {
+            result = Core::ERROR_DUPLICATE_KEY;
             TRACE(Trace::Information, (_T("No need to change power states, we are already at this stage!")));
-        }
-        else {
+        } else if (is_power_state_supported(state)) {
             _adminLock.Unlock();
 
             std::list<Exchange::IPower::INotification*>::iterator index(_notificationClients.begin());
@@ -210,6 +211,9 @@ namespace Plugin {
             if (state != Exchange::IPower::PCState::On) {
                 ControlClients(state);
             }
+
+            /* Better save target state before triggering the transition (Zero delay ?). */
+            power_set_persisted_state(state);
 
             if ( (result = power_set_state(state, waitTime)) != Core::ERROR_NONE) {
                 TRACE(Trace::Information, (_T("Could not change the power state, error: %d"), result));
@@ -234,6 +238,9 @@ namespace Plugin {
         }
 
         _adminLock.Unlock();
+
+        /* May be resuming from another power state; lets update persisted state. */
+        power_set_persisted_state(state);
     }
     void Power::PowerKey() /* override */ {
         if (power_get_state() == Exchange::IPower::PCState::On) {
@@ -248,39 +255,44 @@ namespace Plugin {
     {
         // We only subscribed for the KEY_POWER event so do not
         // expect anything else !!!
-        ASSERT(keyCode == KEY_POWER)
+        ASSERT(keyCode == KEY_POWER);
 
         if (keyCode == KEY_POWER) {
             PowerKey();
         }
     }
-    void Power::StateChange(PluginHost::IShell* plugin)
+    void Power::Activated(const string& callsign, PluginHost::IShell* plugin)
     {
-        const string callsign(plugin->Callsign());
+        PluginHost::IStateControl* stateControl(plugin->QueryInterface<PluginHost::IStateControl>());
 
+        if (stateControl != nullptr) {
+            _adminLock.Lock();
+
+            Clients::iterator index(_clients.find(callsign));
+
+            ASSERT (index == _clients.end());
+
+            if (index == _clients.end()) {
+                _clients.emplace(std::piecewise_construct,
+                    std::forward_as_tuple(callsign),
+                    std::forward_as_tuple(stateControl));
+                TRACE(Trace::Information, (_T("%s plugin is add to power control list"), callsign.c_str()));
+            }
+
+            stateControl->Release();
+
+            _adminLock.Unlock();
+        }
+    }
+    void Power::Deactivated(const string& callsign, PluginHost::IShell* plugin)
+    {
         _adminLock.Lock();
 
         Clients::iterator index(_clients.find(callsign));
 
-        if (plugin->State() == PluginHost::IShell::ACTIVATED) {
-
-            if (index == _clients.end()) {
-                PluginHost::IStateControl* stateControl(plugin->QueryInterface<PluginHost::IStateControl>());
-
-                if (stateControl != nullptr) {
-                    _clients.emplace(std::piecewise_construct,
-                        std::forward_as_tuple(callsign),
-                        std::forward_as_tuple(stateControl));
-                    TRACE(Trace::Information, (_T("%s plugin is add to power control list"), callsign.c_str()));
-                    stateControl->Release();
-                }
-            }
-        } else if (plugin->State() == PluginHost::IShell::DEACTIVATED) {
-
-            if (index != _clients.end()) { // Remove from the list, if it is already there
-                _clients.erase(index);
-                TRACE(Trace::Information, (_T("%s plugin is removed from power control list"), plugin->Callsign().c_str()));
-            }
+        if (index != _clients.end()) { // Remove from the list, if it is already there
+            _clients.erase(index);
+            TRACE(Trace::Information, (_T("%s plugin is removed from power control list"), plugin->Callsign().c_str()));
         }
 
         _adminLock.Unlock();
@@ -288,7 +300,7 @@ namespace Plugin {
 
     void Power::ControlClients(Exchange::IPower::PCState state)
     {
-        if (_controlClients) {
+        if ((_controlClients) && (is_power_state_supported(state))) {
             Clients::iterator client(_clients.begin());
 
             switch (state) {

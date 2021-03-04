@@ -20,10 +20,13 @@ set(MODULE_NAME ${NAMESPACE}${PLUGIN_NAME})
 set(PLAFORM_VOLUMECONTROL volumectrlplatform)
 
 find_package(${NAMESPACE}Plugins REQUIRED)
+find_package(${NAMESPACE}Definitions REQUIRED)
 find_package(CompileSettingsDebug CONFIG REQUIRED)
 find_package(BCM_HOST QUIET)
 find_package(NEXUS QUIET)
 find_package(NXCLIENT QUIET)
+
+option(RDK_AUDIO_HAL "Link against the RDK audio client" OFF)
 
 add_library(${MODULE_NAME} SHARED
     VolumeControl.cpp
@@ -37,16 +40,31 @@ set_target_properties(${MODULE_NAME} PROPERTIES
 target_link_libraries(${MODULE_NAME}
     PRIVATE
         CompileSettingsDebug::CompileSettingsDebug
-        ${NAMESPACE}Plugins::${NAMESPACE}Plugins)
+        ${NAMESPACE}Plugins::${NAMESPACE}Plugins
+        ${NAMESPACE}Definitions::${NAMESPACE}Definitions)
 
 if (NXCLIENT_FOUND AND NEXUS_FOUND)
+    if (VOLUMECONTROL_IMPLEMENTATION_PATH)
+        target_sources(${MODULE_NAME}
+            PRIVATE
+                ${VOLUMECONTROL_IMPLEMENTATION_PATH}/VolumeControlPlatform.cpp)
+    else()
+        include(GetExternalCode)
+        set(VOLUMECONTROL_IMPLEMENTATION_VERSION "master" CACHE STRING "VolumeControl implementation version")
+        set(VOLUMECONTROL_IMPLEMENTATION_REPOSITORY "https://code.rdkcentral.com/r/soc/broadcom/components/rdkcentral/thundernanoservices/VolumeControl" CACHE STRING "VolumeControl implementation repository")
+        GetExternalCode(
+            GIT_REPOSITORY ${VOLUMECONTROL_IMPLEMENTATION_REPOSITORY}
+            GIT_TAG ${VOLUMECONTROL_IMPLEMENTATION_VERSION}
+            SOURCE_DIR "Nexus"
+        )
+        target_sources(${MODULE_NAME}
+            PRIVATE
+                Nexus/VolumeControlPlatform.cpp)
+    endif()
     target_link_libraries(${MODULE_NAME}
         PRIVATE
             NEXUS::NEXUS
             NXCLIENT::NXCLIENT)
-    target_sources(${MODULE_NAME}
-        PRIVATE
-            Nexus/VolumeControlPlatform.cpp)
 elseif (BCM_HOST_FOUND)
     target_link_libraries(${MODULE_NAME}
         PRIVATE
@@ -54,6 +72,18 @@ elseif (BCM_HOST_FOUND)
     target_sources(${MODULE_NAME}
         PRIVATE
             Stub/VolumeControlPlatform.cpp)
+elseif (RDK_AUDIO_HAL)
+    
+    find_library(AUDIO_CLIENT
+        NAMES audio_client)
+
+    target_link_libraries(${MODULE_NAME}
+        PRIVATE
+            ${AUDIO_CLIENT})
+    target_sources(${MODULE_NAME}
+        PRIVATE
+            AMLogic/VolumeControlPlatform.cpp)
+            
 else ()
     message("Using STUB Volume control platform")
     target_sources(${MODULE_NAME}

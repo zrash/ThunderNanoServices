@@ -23,12 +23,12 @@ NetworkControl plugin for Thunder framework.
 <a name="head.Scope"></a>
 ## Scope
 
-This document describes purpose and functionality of the NetworkControl plugin. It includes detailed specification of its configuration, methods and properties provided, as well as notifications sent.
+This document describes purpose and functionality of the NetworkControl plugin. It includes detailed specification about its configuration, methods and properties provided, as well as notifications sent.
 
 <a name="head.Case_Sensitivity"></a>
 ## Case Sensitivity
 
-All identifiers on the interface described in this document are case-sensitive. Thus, unless stated otherwise, all keywords, entities, properties, relations and actions should be treated as such.
+All identifiers of the interfaces described in this document are case-sensitive. Thus, unless stated otherwise, all keywords, entities, properties, relations and actions should be treated as such.
 
 <a name="head.Acronyms,_Abbreviations_and_Terms"></a>
 ## Acronyms, Abbreviations and Terms
@@ -75,7 +75,11 @@ The table below lists configuration options of the plugin.
 | callsign | string | Plugin instance name (default: *NetworkControl*) |
 | classname | string | Class name: *NetworkControl* |
 | locator | string | Library name: *libWPEFrameworkNetworkControl.so* |
-| autostart | boolean | Determines if the plugin is to be started automatically along with the framework |
+| autostart | boolean | Determines if the plugin shall be started automatically along with the framework |
+| configuration | object | <sup>*(optional)*</sup>  |
+| configuration?.dnsfile | string | <sup>*(optional)*</sup> Path to DNS resolve file (default: /etc/resolv.conf) |
+| configuration?.response | number | <sup>*(optional)*</sup> Maximum response time out of the DHCP server |
+| configuration?.retries | number | <sup>*(optional)*</sup> Maximum number of retries to the DHCP server |
 
 <a name="head.Methods"></a>
 # Methods
@@ -86,22 +90,23 @@ NetworkControl interface methods:
 
 | Method | Description |
 | :-------- | :-------- |
-| [reload](#method.reload) | Reloads a static and non-static network interface adapter |
+| [reload](#method.reload) | Reloads a static or non-static network interface adapter |
 | [request](#method.request) | Reloads a non-static network interface adapter |
 | [assign](#method.assign) | Reloads a static network interface adapter |
 | [flush](#method.flush) | Flushes a network interface adapter |
 
+
 <a name="method.reload"></a>
 ## *reload <sup>method</sup>*
 
-Reloads a static and non-static network interface adapter.
+Reloads a static or non-static network interface adapter.
 
 ### Parameters
 
 | Name | Type | Description |
 | :-------- | :-------- | :-------- |
 | params | object |  |
-| params.device | string | Network interface |
+| params.interface | string | Network interface name |
 
 ### Result
 
@@ -125,10 +130,11 @@ Reloads a static and non-static network interface adapter.
     "id": 1234567890,
     "method": "NetworkControl.1.reload",
     "params": {
-        "device": "eth0"
+        "interface": "eth0"
     }
 }
 ```
+
 #### Response
 
 ```json
@@ -138,6 +144,7 @@ Reloads a static and non-static network interface adapter.
     "result": null
 }
 ```
+
 <a name="method.request"></a>
 ## *request <sup>method</sup>*
 
@@ -150,7 +157,7 @@ Also see: [connectionchange](#event.connectionchange)
 | Name | Type | Description |
 | :-------- | :-------- | :-------- |
 | params | object |  |
-| params.device | string | Network interface |
+| params.interface | string | Network interface name |
 
 ### Result
 
@@ -174,10 +181,11 @@ Also see: [connectionchange](#event.connectionchange)
     "id": 1234567890,
     "method": "NetworkControl.1.request",
     "params": {
-        "device": "eth0"
+        "interface": "eth0"
     }
 }
 ```
+
 #### Response
 
 ```json
@@ -187,6 +195,7 @@ Also see: [connectionchange](#event.connectionchange)
     "result": null
 }
 ```
+
 <a name="method.assign"></a>
 ## *assign <sup>method</sup>*
 
@@ -197,7 +206,7 @@ Reloads a static network interface adapter.
 | Name | Type | Description |
 | :-------- | :-------- | :-------- |
 | params | object |  |
-| params.device | string | Network interface |
+| params.interface | string | Network interface name |
 
 ### Result
 
@@ -221,10 +230,11 @@ Reloads a static network interface adapter.
     "id": 1234567890,
     "method": "NetworkControl.1.assign",
     "params": {
-        "device": "eth0"
+        "interface": "eth0"
     }
 }
 ```
+
 #### Response
 
 ```json
@@ -234,6 +244,7 @@ Reloads a static network interface adapter.
     "result": null
 }
 ```
+
 <a name="method.flush"></a>
 ## *flush <sup>method</sup>*
 
@@ -244,7 +255,7 @@ Flushes a network interface adapter.
 | Name | Type | Description |
 | :-------- | :-------- | :-------- |
 | params | object |  |
-| params.device | string | Network interface |
+| params.interface | string | Network interface name |
 
 ### Result
 
@@ -268,10 +279,11 @@ Flushes a network interface adapter.
     "id": 1234567890,
     "method": "NetworkControl.1.flush",
     "params": {
-        "device": "eth0"
+        "interface": "eth0"
     }
 }
 ```
+
 #### Response
 
 ```json
@@ -281,6 +293,7 @@ Flushes a network interface adapter.
     "result": null
 }
 ```
+
 <a name="head.Properties"></a>
 # Properties
 
@@ -290,28 +303,30 @@ NetworkControl interface properties:
 
 | Property | Description |
 | :-------- | :-------- |
-| [network](#property.network) <sup>RO</sup> | Current network information |
+| [network](#property.network) | Network information |
+| [dns](#property.dns) | DNS addresses |
 | [up](#property.up) | Interface up status |
+
 
 <a name="property.network"></a>
 ## *network <sup>property</sup>*
 
-Provides access to the current network information.
-
-> This property is **read-only**.
+Provides access to the network information.
 
 ### Value
 
 | Name | Type | Description |
 | :-------- | :-------- | :-------- |
-| (property) | array | Current network information |
+| (property) | array | Network information |
 | (property)[#] | object |  |
-| (property)[#]?.interface | string | <sup>*(optional)*</sup> Interface name |
+| (property)[#]?.interface | string | <sup>*(optional)*</sup> Network interface name |
 | (property)[#]?.mode | string | <sup>*(optional)*</sup> Mode (must be one of the following: *Manual*, *Static*, *Dynamic*) |
 | (property)[#]?.address | string | <sup>*(optional)*</sup> IP address |
 | (property)[#]?.mask | number | <sup>*(optional)*</sup> Network interface mask |
 | (property)[#]?.gateway | string | <sup>*(optional)*</sup> Gateway address |
 | (property)[#]?.broadcast | string | <sup>*(optional)*</sup> Broadcast IP |
+| (property)[#]?.dns | array | <sup>*(optional)*</sup> DNS addresses |
+| (property)[#]?.dns[#] | string | <sup>*(optional)*</sup> DNS addresses |
 
 > The *interface* shall be passed as the index to the property, e.g. *NetworkControl.1.network@eth0*. If network interface is not given, all network interfaces are returned.
 
@@ -332,6 +347,7 @@ Provides access to the current network information.
     "method": "NetworkControl.1.network@eth0"
 }
 ```
+
 #### Get Response
 
 ```json
@@ -345,11 +361,107 @@ Provides access to the current network information.
             "address": "192.168.1.158",
             "mask": 24,
             "gateway": "192.168.1.1",
-            "broadcast": "192.168.1.255"
+            "broadcast": "192.168.1.255",
+            "dns": [
+                "['192.168.1.1', 'www.google.com', '8.8.8.8']"
+            ]
         }
     ]
 }
 ```
+
+#### Set Request
+
+```json
+{
+    "jsonrpc": "2.0",
+    "id": 1234567890,
+    "method": "NetworkControl.1.network@eth0",
+    "params": [
+        {
+            "interface": "eth0",
+            "mode": "dynamic",
+            "address": "192.168.1.158",
+            "mask": 24,
+            "gateway": "192.168.1.1",
+            "broadcast": "192.168.1.255",
+            "dns": [
+                "['192.168.1.1', 'www.google.com', '8.8.8.8']"
+            ]
+        }
+    ]
+}
+```
+
+#### Set Response
+
+```json
+{
+    "jsonrpc": "2.0",
+    "id": 1234567890,
+    "result": "null"
+}
+```
+
+<a name="property.dns"></a>
+## *dns <sup>property</sup>*
+
+Provides access to the DNS addresses.
+
+### Value
+
+| Name | Type | Description |
+| :-------- | :-------- | :-------- |
+| (property) | array | DNS addresses |
+| (property)[#] | string | DNS addresses |
+
+### Example
+
+#### Get Request
+
+```json
+{
+    "jsonrpc": "2.0",
+    "id": 1234567890,
+    "method": "NetworkControl.1.dns"
+}
+```
+
+#### Get Response
+
+```json
+{
+    "jsonrpc": "2.0",
+    "id": 1234567890,
+    "result": [
+        "['192.168.1.1', 'www.google.com', '8.8.8.8']"
+    ]
+}
+```
+
+#### Set Request
+
+```json
+{
+    "jsonrpc": "2.0",
+    "id": 1234567890,
+    "method": "NetworkControl.1.dns",
+    "params": [
+        "['192.168.1.1', 'www.google.com', '8.8.8.8']"
+    ]
+}
+```
+
+#### Set Response
+
+```json
+{
+    "jsonrpc": "2.0",
+    "id": 1234567890,
+    "result": "null"
+}
+```
+
 <a name="property.up"></a>
 ## *up <sup>property</sup>*
 
@@ -386,6 +498,7 @@ Provides access to the interface up status.
     "method": "NetworkControl.1.up@eth0"
 }
 ```
+
 #### Get Response
 
 ```json
@@ -395,6 +508,7 @@ Provides access to the interface up status.
     "result": false
 }
 ```
+
 #### Set Request
 
 ```json
@@ -405,6 +519,7 @@ Provides access to the interface up status.
     "params": false
 }
 ```
+
 #### Set Response
 
 ```json
@@ -414,10 +529,11 @@ Provides access to the interface up status.
     "result": "null"
 }
 ```
+
 <a name="head.Notifications"></a>
 # Notifications
 
-Notifications are autonomous events, triggered by the internals of the plugin, and broadcasted via JSON-RPC to all registered observers. Refer to [[Thunder](#ref.Thunder)] for information on how to register for a notification.
+Notifications are autonomous events, triggered by the internals of the implementation, and broadcasted via JSON-RPC to all registered observers. Refer to [[Thunder](#ref.Thunder)] for information on how to register for a notification.
 
 The following events are provided by the NetworkControl plugin:
 
@@ -425,21 +541,22 @@ NetworkControl interface events:
 
 | Event | Description |
 | :-------- | :-------- |
-| [connectionchange](#event.connectionchange) | Notifies about connection status (created, updated, removed, connected and connectionfailed) |
+| [connectionchange](#event.connectionchange) | Notifies about connection status (created, updated, removed, connected, ipassigned and connectionfailed) |
+
 
 <a name="event.connectionchange"></a>
 ## *connectionchange <sup>event</sup>*
 
-Notifies about connection status (created, updated, removed, connected and connectionfailed).
+Notifies about connection status (created, updated, removed, connected, ipassigned and connectionfailed).
 
 ### Parameters
 
 | Name | Type | Description |
 | :-------- | :-------- | :-------- |
 | params | object |  |
-| params.name | string | Name of network interface |
+| params.name | string | Network interface name |
 | params.address | string | IP Address of network interface, if it is connected |
-| params.status | string | Status of the interface, update, connected or not (must be one of the following: *created*, *updated*, *removed*, *connected*, *connectionfailed*) |
+| params.status | string | Status of the interface, update, connected or not (must be one of the following: *created*, *updated*, *removed*, *connected*, *ipassigned*, *connectionfailed*) |
 
 ### Example
 
@@ -454,3 +571,4 @@ Notifies about connection status (created, updated, removed, connected and conne
     }
 }
 ```
+

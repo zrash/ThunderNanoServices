@@ -37,8 +37,7 @@ namespace Plugin {
 
     static const char SampleData[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789=!";
 
-    /* encapsulated class Thread  */
-    /* virtual */ const string OutOfProcessPlugin::Initialize(PluginHost::IShell* service)
+    const string OutOfProcessPlugin::Initialize(PluginHost::IShell* service) /* override */
     {
         string message;
         Config config;
@@ -52,13 +51,14 @@ namespace Plugin {
         _skipURL = static_cast<uint8_t>(_service->WebPrefix().length());
         _service->EnableWebServer(_T("UI"), EMPTY_STRING);
         _service->Register(static_cast<RPC::IRemoteConnection::INotification*>(_notification));
-
+        _service->Register(static_cast<PluginHost::IPlugin::INotification*>(_notification));
         config.FromString(_service->ConfigLine());
 
         _browser = service->Root<Exchange::IBrowser>(_connectionId, Core::infinite, _T("OutOfProcessImplementation"));
 
         if (_browser == nullptr) {
             _service->Unregister(static_cast<RPC::IRemoteConnection::INotification*>(_notification));
+            _service->Unregister(static_cast<PluginHost::IPlugin::INotification*>(_notification));
             _service = nullptr;
 
             ConnectionTermination(_connectionId);
@@ -68,17 +68,30 @@ namespace Plugin {
 
             PluginHost::IStateControl* stateControl(_browser->QueryInterface<PluginHost::IStateControl>());
 
-            ASSERT(stateControl != nullptr);
+            if (stateControl != nullptr) {
 
-            stateControl->Configure(_service);
-            stateControl->Register(_notification);
-            stateControl->Release();
+                _state = stateControl;
 
-            RPC::IRemoteConnection* remoteConnection = _service->RemoteConnection(_connectionId);
+                _state->Configure(_service);
+                _state->Register(_notification);
 
-            _memory = WPEFramework::OutOfProcessPlugin::MemoryObserver(remoteConnection);
-            ASSERT(_memory != nullptr);
-            remoteConnection->Release();
+                PluginHost::IPlugin::INotification* sink = _browser->QueryInterface<PluginHost::IPlugin::INotification>();
+
+                if (sink != nullptr) {
+                    _service->Register(sink);
+                    sink->Release();
+
+                    RPC::IRemoteConnection* remoteConnection = _service->RemoteConnection(_connectionId);
+                    if (remoteConnection != nullptr) {
+                        _memory = WPEFramework::OutOfProcessPlugin::MemoryObserver(remoteConnection);
+                        ASSERT(_memory != nullptr);
+                        remoteConnection->Release();
+                    }
+                    else {
+                        message = _T("Failed to instantiate the Server.");
+                    }
+                }
+            }
         }
 
         return message;
@@ -89,39 +102,88 @@ namespace Plugin {
         ASSERT(service == _service);
         ASSERT(_browser != nullptr);
 
-        fprintf(stderr, "================ Deinitializing the OutOfProcessPlugin forcefully =================\n"); fflush(stderr);
-
         _service->DisableWebServer();
         _service->Unregister(static_cast<RPC::IRemoteConnection::INotification*>(_notification));
+        _service->Unregister(static_cast<PluginHost::IPlugin::INotification*>(_notification));
         _browser->Unregister(_notification);
         _memory->Release();
 
-        PluginHost::IStateControl* stateControl(_browser->QueryInterface<PluginHost::IStateControl>());
+        PluginHost::IPlugin::INotification* sink = _browser->QueryInterface<PluginHost::IPlugin::INotification>();
 
-        if (stateControl != nullptr) {
+        if (sink != nullptr) {
+            _service->Unregister(sink);
+            sink->Release();
+        }
+
+        if (_state != nullptr) {
 
             // No longer a need for the notfications..
-            stateControl->Unregister(_notification);
-            stateControl->Release();
+            _state->Unregister(_notification);
+            _state->Release();
         }
 
         // Stop processing of the browser:
-        if (_browser->Release() != Core::ERROR_DESTRUCTION_SUCCEEDED) {
+        _browser->Release();
 
-            ASSERT(_connectionId != 0);
-
-
-            TRACE_L1("OutOfProcess Plugin is not properly destructed. PID: %d", _connectionId);
-
-            fprintf(stderr, "================ Deactivating the OutOfProcessPlugin forcefully =================\n"); fflush(stderr);
+        if(_connectionId != 0){
             ConnectionTermination(_connectionId);
-            fprintf(stderr, "================ Deactivated the OutOfProcessPlugin forcefully ==================\n"); fflush(stderr);
         }
 
         _memory = nullptr;
         _browser = nullptr;
         _service = nullptr;
-        fprintf(stderr, "================ Deinitialized the OutOfProcessPlugin forcefully ==================\n"); fflush(stderr);
+    }
+
+       /* static */ const char* OutOfProcessPlugin::PluginStateStr(const PluginHost::IShell::state state)
+    {
+        switch (state) {
+        case PluginHost::IShell::DEACTIVATED:
+            return "DEACTIVATED";
+        case PluginHost::IShell::DEACTIVATION:
+            return "DEACTIVATION";
+        case PluginHost::IShell::ACTIVATED:
+            return "ACTIVATED";
+        case PluginHost::IShell::ACTIVATION:
+            return "ACTIVATION";
+        case PluginHost::IShell::PRECONDITION:
+            return "PRECONDITION";
+        case PluginHost::IShell::DESTROYED:
+            return "DESTROYED";
+        default:
+            break;
+        }
+
+        return "### UNKNOWN ###";
+    }
+
+    void OutOfProcessPlugin::Activated(const string& callsign, PluginHost::IShell* plugin)
+    {
+        ASSERT(plugin != nullptr);
+
+        const PluginHost::IShell::state state = plugin->State();
+        const char* stateStr = PluginStateStr(state);
+
+        TRACE(Trace::Information, (_T("OutOfProcessPlugin::PluginStateChanged: Got [%s] plugin [%s] event..."), callsign.c_str(), stateStr));
+    }
+
+    void OutOfProcessPlugin::Deactivated(const string& callsign, PluginHost::IShell* plugin)
+    {
+        ASSERT(plugin != nullptr);
+
+        const PluginHost::IShell::state state = plugin->State();
+        const char* stateStr = PluginStateStr(state);
+
+        TRACE(Trace::Information, (_T("OutOfProcessPlugin::PluginStateChanged: Got [%s] plugin [%s] event..."), callsign.c_str(), stateStr));
+
+        if (callsign == "OutOfProcessPlugin") {
+            if(_state != nullptr) {
+                TRACE(Trace::Information, (_T("OutOfProcessPlugin::PluginStateChanged: Doing RPC call with IShell * ptr...")));
+                _state->Configure(plugin); //note this indeed does not make sense but is used to trigger an IShell* call to the OOP side to reproduce an issue there
+                TRACE(Trace::Information, (_T("OutOfProcessPlugin::PluginStateChanged: Doing RPC call with IShell * ptr...DONE")));
+            }
+        }
+
+        TRACE(Trace::Information, (_T("OutOfProcessPlugin::PluginStateChanged: Got [%s] plugin [%s] event...DONE"), callsign.c_str(), stateStr));
     }
 
     /* virtual */ string OutOfProcessPlugin::Information() const
@@ -234,15 +296,16 @@ namespace Plugin {
         Data info(URL);
         string message;
         info.ToString(message);
-        TRACE_L1("Received a new URL: %s", message.c_str());
-        TRACE_L1("URL length: %u", static_cast<uint32_t>(message.length()));
-        fprintf(stderr, "================ URL Changed [%s] =================\n", URL.c_str()); fflush(stderr);
+        TRACE(Trace::Information, (_T("Received a new URL: %s"), message.c_str()));
+        TRACE(Trace::Information, (_T("URL length: %u"), static_cast<uint32_t>(message.length())));
+        TRACE(Trace::Information, (_T("Parent process recceived a changed URL: [%s]"), URL.c_str()));
 
         _service->Notify(message);
     }
 
     void OutOfProcessPlugin::Hidden(const bool hidden)
     {
+        TRACE(Trace::Information, (_T("Parent process recceived a changed visibility: [%s]"), hidden ? _T("Hidden") : _T("Shown")));
         string message = "{ \"hidden\": \"" + string(hidden ? _T("true") : _T("false")) + "\" }";
 
         _service->Notify(message);
@@ -250,6 +313,7 @@ namespace Plugin {
 
     void OutOfProcessPlugin::StateChange(const PluginHost::IStateControl::state value)
     {
+        TRACE(Trace::Information, (_T("Parent process recceived a changed state: [%s]"), value == PluginHost::IStateControl::state::RESUMED ? _T("Resumed") : _T("Suspended")));
         string message = "{ \"state\": \"test\" }";
 
         _service->Notify(message);

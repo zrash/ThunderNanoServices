@@ -24,98 +24,137 @@
 namespace WPEFramework {
 
 struct INotifier {
-    virtual ~INotifier() {}
-    virtual void NotifyDownloadStatus(const uint32_t status) = 0;
+    virtual ~INotifier() = default;
+    virtual void NotifyStatus(const uint32_t status) = 0;
+    virtual void NotifyProgress(const uint32_t transferred) = 0;
 };
 
 namespace PluginHost {
 
+    // Here we might potentially start using Web::SignedFileBodyType<Crypto::HMAC256>>
+
     class DownloadEngine : public Web::ClientTransferType<Core::SocketStream, Web::SignedFileBodyType<Crypto::SHA256>> {
     private:
         typedef Web::ClientTransferType<Core::SocketStream, Web::SignedFileBodyType<Crypto::SHA256>> BaseClass;
+        static int32_t constexpr ProgressInterval = 1000;   // In millisconds
+        static int32_t constexpr ProgressWaitTimeOut = 60; // In seconds
 
+    public:
         DownloadEngine() = delete;
         DownloadEngine(const DownloadEngine&) = delete;
         DownloadEngine& operator=(const DownloadEngine&) = delete;
 
-    public:
-        DownloadEngine(INotifier* notifier, const string& downloadStorage)
-            : BaseClass(false, Core::NodeId(_T("0.0.0.0")), Core::NodeId(), 1024, 1024)
+        DownloadEngine(INotifier* notifier, const string& hashKey, const uint16_t interval)
+            : BaseClass(false, Core::NodeId(_T("0.0.0.0")), Core::NodeId(), 1024, ((64 * 1024) - 1))
+            , _adminLock()
             , _notifier(notifier)
-            , _storage(downloadStorage.c_str(), false)
+            , _storage()
+            , _transferred(0)
+            , _interval(interval)
+            , _progressInterval(1)
+            , _progressWaitTime(0)
+            , _checkHash(false)
+            , _isResumeSupported(false)
+            , _activity(*this)
         {
+            // If we are going for HMAC, here we could set our secret...
+            memset(_HMAC, 0, Crypto::HASH_SHA256);
+            // BaseClass::Hash().Key(hashKey);
         }
-        virtual ~DownloadEngine()
+        ~DownloadEngine() override
         {
+            _adminLock.Lock();
+            _activity.Revoke();
+            _adminLock.Unlock();
         }
 
     public:
-        uint32_t Start(const string& locator, const string& destination, const string& hash)
+        uint32_t CollectInfo(const string& locator)
+        {
+            Core::URL url(locator);
+            return BaseClass::CollectInfo(url);
+        }
+        uint32_t Start(const string& locator, const string& destination, const string& hashValue, const uint64_t position)
         {
             Core::URL url(locator);
             uint32_t result = (url.IsValid() == true ? Core::ERROR_INPROGRESS : Core::ERROR_INCORRECT_URL);
 
-            if (result == Core::ERROR_INPROGRESS) {
+            _adminLock.Lock();
 
-                _adminLock.Lock();
+            // But I guess for the firmware control, we are getting the
+            // HMAC, not via an HTTP header but Through REST API, we need
+            // to remeber what it should be. Lets safe the HMAC for
+            // validation, if it is transferred here....
+            if (hashValue.empty() == false) {
+                if (HashStringToBytes(hashValue, _HMAC) == true) {
+                    _checkHash = true;
+                } else {
+                    result = Core::ERROR_INCORRECT_HASH;
+                }
+            }
 
-                CleanupStorage();
+            if ((result == Core::ERROR_INPROGRESS) && (_storage.IsOpen() == false)) {
 
-                if (_storage.IsOpen() == false) {
+                result = Core::ERROR_OPENING_FAILED;
+                _storage = destination;
 
-                    result = Core::ERROR_OPENING_FAILED;
+                (position == 0)? _storage.Create(): _storage.Open(false);
+                if (_storage.IsOpen() == true) {
+                    result = BaseClass::Download(url, _storage, position);
 
-                    if (_storage.Create() == true) {
-
-                        _hash = hash;
-
-                        result = BaseClass::Download(url, _storage);
+                    if (((result == Core::ERROR_NONE) || (result == Core::ERROR_INPROGRESS)) && (_interval != 0)) {
+                        _activity.Revoke();
+                        _activity.Schedule(Core::Time::Now().Add(ProgressInterval));
                     }
                 }
-
-                _adminLock.Unlock();
             }
+            _adminLock.Unlock();
 
             return (result);
         }
-
-        inline void CleanupStorage()
+        bool IsResumeSupported() const
         {
-            if (_storage.Exists()) {
-                _storage.Destroy();
-            }
+            return _isResumeSupported;
         }
-    private:
-        virtual void Transfered(const uint32_t result, const Web::SignedFileBodyType<Crypto::SHA256>& destination) override
-        {
-            uint32_t status = result;
-            if (status == Core::ERROR_NONE) {
-                if (_hash.empty() != true) {
-                    uint8_t hashHex[Crypto::HASH_SHA256];
-                    if (HashStringToBytes(_hash, hashHex) == true) {
 
-                        const uint8_t* downloadedHash = destination.SerializedHashValue();
-                        if (downloadedHash != nullptr) {
-                            for (uint16_t i = 0; i < Crypto::HASH_SHA256; i++) {
-                                if (downloadedHash[i] != hashHex[i]) {
-                                    status = Core::ERROR_INCORRECT_HASH;
-                                    break;
-                                }
-                            }
-                        }
+    private:
+        void InfoCollected(const uint32_t result, const Core::ProxyType<Web::Response>& info) override
+        {
+            _isResumeSupported = false;
+            if (result == Core::ERROR_NONE) {
+                if (info.IsValid() == true) {
+                    if (info->AcceptRange.IsSet() == true && (info->AcceptRange.Value() == "bytes")) {
+                        _isResumeSupported = true;
                     }
+                    info.Release();
                 }
             }
             if (_notifier != nullptr) {
-                _notifier->NotifyDownloadStatus(status);
+                _notifier->NotifyStatus(result);
             }
+        }
+        void Transferred(const uint32_t result, const Web::SignedFileBodyType<Crypto::SHA256>& destination) override
+        {
+            uint32_t status = result;
+
+            // Let's see if the calculated HMAC is what we expected....
+            if ((status == Core::ERROR_NONE) && (_checkHash == true) &&
+                (::memcmp(const_cast<Web::SignedFileBodyType<Crypto::SHA256>&>(destination).Hash().Result(), _HMAC, Crypto::HASH_SHA256) != 0)) {
+
+                status = Core::ERROR_UNAUTHENTICATED;
+            }
+            _storage.Close();
 
             _adminLock.Lock();
-            _storage.Close();
+
+            if (_notifier != nullptr) {
+                _notifier->NotifyStatus(status);
+            }
+
             _adminLock.Unlock();
         }
 
-        virtual bool Setup(const Core::URL& remote) override
+        bool Setup(const Core::URL& remote) override
         {
             bool result = false;
 
@@ -129,7 +168,7 @@ namespace PluginHost {
             return (result);
         }
 
-        inline bool HashStringToBytes(const std::string& hash, uint8_t (&hashHex)[Crypto::HASH_SHA256])
+        inline bool HashStringToBytes(const string& hash, uint8_t hashHex[Crypto::HASH_SHA256])
         {
             bool status = true;
 
@@ -148,12 +187,55 @@ namespace PluginHost {
 	    return status;
         }
 
+        friend Core::ThreadPool::JobType<DownloadEngine&>;
+        void Dispatch()
+        {
+            _adminLock.Lock();
+
+            if (_notifier != nullptr) {
+
+                uint32_t transferred = BaseClass::Transferred();
+                if (transferred == _transferred) {
+                    _progressWaitTime++;
+                } else {
+                    _progressWaitTime = 0;
+                }
+
+                if (_progressWaitTime == ProgressWaitTimeOut) {
+                    _adminLock.Unlock();
+                    Close();
+                } else {
+                    if (_interval && (_progressInterval == _interval)) {
+                        if (transferred && (transferred > _transferred)) {
+                            _notifier->NotifyProgress(transferred);
+                            _transferred = transferred;
+                        }
+                        _progressInterval = 1;
+                    } else {
+                        _progressInterval++;
+                    }
+                    _activity.Schedule(Core::Time::Now().Add(ProgressInterval));
+                    _adminLock.Unlock();
+                }
+            } else {
+                _adminLock.Unlock();
+            }
+        }
 
     private:
-        string _hash;
         Core::CriticalSection _adminLock;
         INotifier* _notifier;
         Core::File _storage;
+
+        uint32_t _transferred;
+        uint16_t _interval;
+        uint16_t _progressInterval;
+        uint16_t _progressWaitTime;
+
+        bool _checkHash;
+        bool _isResumeSupported;
+        uint8_t _HMAC[Crypto::HASH_SHA256];
+        Core::WorkerPool::JobType<DownloadEngine&> _activity;
     };
 }
 }

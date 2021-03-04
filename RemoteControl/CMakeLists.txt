@@ -57,9 +57,23 @@ if (NXCLIENT_FOUND AND NEXUS_FOUND)
         target_compile_definitions(${MODULE_NAME} 
             PRIVATE 
                 IR_ENABLED)
-        target_sources(${MODULE_NAME} 
-            PRIVATE 
-                IRRemote.cpp)
+        if (REMOTECONTROL_IMPLEMENTATION_PATH)
+            target_sources(${MODULE_NAME}
+                PRIVATE
+                    ${REMOTECONTROL_IMPLEMENTATION_PATH}/IRRemote.cpp)
+        else()
+            include(GetExternalCode)
+            set(REMOTECONTROL_IMPLEMENTATION_VERSION "master" CACHE STRING "RemoteControl implementation version")
+            set(REMOTECONTROL_IMPLEMENTATION_REPOSITORY "https://code.rdkcentral.com/r/soc/broadcom/components/rdkcentral/thundernanoservices/RemoteControl" CACHE STRING "RemoteControl implementation repository")
+            GetExternalCode(
+                GIT_REPOSITORY ${REMOTECONTROL_IMPLEMENTATION_REPOSITORY}
+                GIT_TAG ${REMOTECONTROL_IMPLEMENTATION_VERSION}
+                SOURCE_DIR "Nexus"
+            )
+            target_sources(${MODULE_NAME}
+                PRIVATE
+                    Nexus/IRRemote.cpp)
+        endif()
         target_link_libraries(${MODULE_NAME} 
             PRIVATE 
                 NEXUS::NEXUS 

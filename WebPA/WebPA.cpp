@@ -43,14 +43,23 @@ SERVICE_REGISTRATION(WebPA, 1, 0);
     _webpa =  _service->Root<Exchange::IWebPA>(_connectionId, ImplWaitTime, _T("WebPAImplementation"));
 
     if (nullptr != _webpa)  {
-        TRACE(Trace::Information, (_T("Successfully instantiated WebPA Service")));
-            // Configure and Launch Service
-            _webpa->Initialize(_service);
-
+        // Configure and Launch Service
+        if (_webpa->Initialize(_service) == Core::ERROR_NONE) {
+            TRACE(Trace::Information, (_T("Successfully instantiated WebPA Service")));
+        } else {
+            _webpa->Release();
+            _webpa = nullptr;
+            TRACE(Trace::Error, (_T("WebPA Service could not be launched.")));
+            message = _T("WebPA Service could not be launched.");
+        }
     } else {
-        _service->Unregister(&_notification);
         TRACE(Trace::Error, (_T("WebPA Service could not be instantiated.")));
         message = _T("WebPA Service could not be instantiated.");
+    }
+
+    if (_webpa == nullptr) {
+        _service->Unregister(&_notification);
+        _service = nullptr;
     }
 
     return message;
@@ -64,15 +73,13 @@ SERVICE_REGISTRATION(WebPA, 1, 0);
     _service->Unregister(&_notification);
 
     _webpa->Deinitialize(_service);
-    if (_webpa->Release() != Core::ERROR_DESTRUCTION_SUCCEEDED) {
-        ASSERT(_connectionId != 0);
-        TRACE(Trace::Error, (_T("OutOfProcess Plugin is not properly destructed. PID: %d"), _connectionId));
+    _webpa->Release();
 
+    if(_connectionId != 0){
         RPC::IRemoteConnection* serviceConnection(_service->RemoteConnection(_connectionId));
 
         // The connection can disappear in the meantime...
         if (nullptr != serviceConnection) {
-
             // But if it did not dissapear in the meantime, forcefully terminate it. Shoot to kill :-)
             serviceConnection->Terminate();
             serviceConnection->Release();
@@ -112,7 +119,7 @@ SERVICE_REGISTRATION(WebPA, 1, 0);
 
 void WebPA::Deactivated(RPC::IRemoteConnection* connection)
 {
-    ASSERT(connection != nullptr)
+    ASSERT(connection != nullptr);
 
     // This can potentially be called on a socket thread, so the deactivation (wich in turn kills this object) must be done
     // on a seperate thread. Also make sure this call-stack can be unwound before we are totally destructed.

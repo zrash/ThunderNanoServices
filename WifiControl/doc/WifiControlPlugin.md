@@ -1,6 +1,6 @@
 <!-- Generated automatically, DO NOT EDIT! -->
-<a name="head.WiFi_Control_Plugin"></a>
-# WiFi Control Plugin
+<a name="head.Wifi_Control_Plugin"></a>
+# Wifi Control Plugin
 
 **Version: 1.0**
 
@@ -23,12 +23,12 @@ WifiControl plugin for Thunder framework.
 <a name="head.Scope"></a>
 ## Scope
 
-This document describes purpose and functionality of the WifiControl plugin. It includes detailed specification of its configuration, methods and properties provided, as well as notifications sent.
+This document describes purpose and functionality of the WifiControl plugin. It includes detailed specification about its configuration, methods and properties provided, as well as notifications sent.
 
 <a name="head.Case_Sensitivity"></a>
 ## Case Sensitivity
 
-All identifiers on the interface described in this document are case-sensitive. Thus, unless stated otherwise, all keywords, entities, properties, relations and actions should be treated as such.
+All identifiers of the interfaces described in this document are case-sensitive. Thus, unless stated otherwise, all keywords, entities, properties, relations and actions should be treated as such.
 
 <a name="head.Acronyms,_Abbreviations_and_Terms"></a>
 ## Acronyms, Abbreviations and Terms
@@ -75,7 +75,14 @@ The table below lists configuration options of the plugin.
 | callsign | string | Plugin instance name (default: *WifiControl*) |
 | classname | string | Class name: *WifiControl* |
 | locator | string | Library name: *libWPEWifiControl.so* |
-| autostart | boolean | Determines if the plugin is to be started automatically along with the framework |
+| autostart | boolean | Determines if the plugin shall be started automatically along with the framework |
+| configuration | object | <sup>*(optional)*</sup>  |
+| configuration?.connector | string | <sup>*(optional)*</sup> Connector name |
+| configuration?.interface | string | <sup>*(optional)*</sup> Interface name |
+| configuration?.application | string | <sup>*(optional)*</sup> Application name |
+| configuration?.preferred | string | <sup>*(optional)*</sup> Preferred |
+| configuration?.autoconnect | string | <sup>*(optional)*</sup> Enable autoconnect |
+| configuration?.retryinterval | string | <sup>*(optional)*</sup> Retry interval |
 
 <a name="head.Methods"></a>
 # Methods
@@ -91,6 +98,7 @@ WifiControl interface methods:
 | [scan](#method.scan) | Searches for available networks |
 | [connect](#method.connect) | Attempts connection to a network |
 | [disconnect](#method.disconnect) | Disconnects from a network |
+
 
 <a name="method.delete"></a>
 ## *delete <sup>method</sup>*
@@ -124,6 +132,7 @@ Forgets the configuration of a network.
     }
 }
 ```
+
 #### Response
 
 ```json
@@ -133,6 +142,7 @@ Forgets the configuration of a network.
     "result": null
 }
 ```
+
 <a name="method.store"></a>
 ## *store <sup>method</sup>*
 
@@ -165,6 +175,7 @@ This method takes no parameters.
     "method": "WifiControl.1.store"
 }
 ```
+
 #### Response
 
 ```json
@@ -174,6 +185,7 @@ This method takes no parameters.
     "result": null
 }
 ```
+
 <a name="method.scan"></a>
 ## *scan <sup>method</sup>*
 
@@ -209,6 +221,7 @@ This method takes no parameters.
     "method": "WifiControl.1.scan"
 }
 ```
+
 #### Response
 
 ```json
@@ -218,6 +231,7 @@ This method takes no parameters.
     "result": null
 }
 ```
+
 <a name="method.connect"></a>
 ## *connect <sup>method</sup>*
 
@@ -243,6 +257,9 @@ Also see: [connectionchange](#event.connectionchange)
 | Code | Message | Description |
 | :-------- | :-------- | :-------- |
 | 22 | ```ERROR_UNKNOWN_KEY``` | Returned when the network with a the given SSID doesn't exists |
+| 2 | ```ERROR_UNAVAILABLE``` | Returned when connection fails if there is no associated bssid to connect and not defined as AccessPoint. Rescan and try to connect |
+| 38 | ```ERROR_INVALID_SIGNATURE``` | Returned when connection is attempted with wrong password |
+| 9 | ```ERROR_ALREADY_CONNECTED``` | Returned when connection already exists |
 | 4 | ```ERROR_ASYNC_ABORTED``` | Returned when connection attempt fails for other reasons |
 
 ### Example
@@ -259,6 +276,7 @@ Also see: [connectionchange](#event.connectionchange)
     }
 }
 ```
+
 #### Response
 
 ```json
@@ -268,6 +286,7 @@ Also see: [connectionchange](#event.connectionchange)
     "result": null
 }
 ```
+
 <a name="method.disconnect"></a>
 ## *disconnect <sup>method</sup>*
 
@@ -309,6 +328,7 @@ Also see: [connectionchange](#event.connectionchange)
     }
 }
 ```
+
 #### Response
 
 ```json
@@ -318,6 +338,7 @@ Also see: [connectionchange](#event.connectionchange)
     "result": null
 }
 ```
+
 <a name="head.Properties"></a>
 # Properties
 
@@ -330,8 +351,9 @@ WifiControl interface properties:
 | [status](#property.status) <sup>RO</sup> | Network status |
 | [networks](#property.networks) <sup>RO</sup> | Available networks |
 | [configs](#property.configs) <sup>RO</sup> | All WiFi configurations |
-| [config](#property.config) | Single WiFi conifguration |
+| [config](#property.config) | Single WiFi configuration |
 | [debug](#property.debug) <sup>WO</sup> | Sets debug level |
+
 
 <a name="property.status"></a>
 ## *status <sup>property</sup>*
@@ -359,6 +381,7 @@ Provides access to the network status.
     "method": "WifiControl.1.status"
 }
 ```
+
 #### Get Response
 
 ```json
@@ -371,6 +394,7 @@ Provides access to the network status.
     }
 }
 ```
+
 <a name="property.networks"></a>
 ## *networks <sup>property</sup>*
 
@@ -405,6 +429,7 @@ Provides access to the available networks.
     "method": "WifiControl.1.networks"
 }
 ```
+
 #### Get Response
 
 ```json
@@ -429,6 +454,7 @@ Provides access to the available networks.
     ]
 }
 ```
+
 <a name="property.configs"></a>
 ## *configs <sup>property</sup>*
 
@@ -443,7 +469,7 @@ Provides access to the all WiFi configurations.
 | (property) | array | All WiFi configurations |
 | (property)[#] | object |  |
 | (property)[#].ssid | string | Identifier of a network |
-| (property)[#]?.type | string | <sup>*(optional)*</sup> Level of security (must be one of the following: *Unknown*, *Unsecure*, *WPA*, *Enterprise*) |
+| (property)[#]?.type | string | <sup>*(optional)*</sup> Type of protection. WPA_WPA2 means WPA, WPA2 and mixed types are allowed (must be one of the following: *Unknown*, *Unsecure*, *WPA*, *WPA2*, *WPA_WPA2*, *Enterprise*) |
 | (property)[#].hidden | boolean | Indicates whether a network is hidden |
 | (property)[#].accesspoint | boolean | Indicates if the network operates in AP mode |
 | (property)[#]?.psk | string | <sup>*(optional)*</sup> Network's PSK in plaintext (irrelevant if hash is provided) |
@@ -468,6 +494,7 @@ Provides access to the all WiFi configurations.
     "method": "WifiControl.1.configs"
 }
 ```
+
 #### Get Response
 
 ```json
@@ -477,7 +504,7 @@ Provides access to the all WiFi configurations.
     "result": [
         {
             "ssid": "MyCorporateNetwork",
-            "type": "WPA",
+            "type": "WPA_WPA2",
             "hidden": false,
             "accesspoint": true,
             "psk": "secretpresharedkey",
@@ -488,18 +515,19 @@ Provides access to the all WiFi configurations.
     ]
 }
 ```
+
 <a name="property.config"></a>
 ## *config <sup>property</sup>*
 
-Provides access to the single WiFi conifguration.
+Provides access to the single WiFi configuration.
 
 ### Value
 
 | Name | Type | Description |
 | :-------- | :-------- | :-------- |
-| (property) | object | Single WiFi conifguration |
+| (property) | object | Single WiFi configuration |
 | (property).ssid | string | Identifier of a network |
-| (property)?.type | string | <sup>*(optional)*</sup> Level of security (must be one of the following: *Unknown*, *Unsecure*, *WPA*, *Enterprise*) |
+| (property)?.type | string | <sup>*(optional)*</sup> Type of protection. WPA_WPA2 means WPA, WPA2 and mixed types are allowed (must be one of the following: *Unknown*, *Unsecure*, *WPA*, *WPA2*, *WPA_WPA2*, *Enterprise*) |
 | (property).hidden | boolean | Indicates whether a network is hidden |
 | (property).accesspoint | boolean | Indicates if the network operates in AP mode |
 | (property)?.psk | string | <sup>*(optional)*</sup> Network's PSK in plaintext (irrelevant if hash is provided) |
@@ -527,6 +555,7 @@ Provides access to the single WiFi conifguration.
     "method": "WifiControl.1.config@MyCorporateNetwork"
 }
 ```
+
 #### Get Response
 
 ```json
@@ -535,7 +564,7 @@ Provides access to the single WiFi conifguration.
     "id": 1234567890,
     "result": {
         "ssid": "MyCorporateNetwork",
-        "type": "WPA",
+        "type": "WPA_WPA2",
         "hidden": false,
         "accesspoint": true,
         "psk": "secretpresharedkey",
@@ -545,6 +574,7 @@ Provides access to the single WiFi conifguration.
     }
 }
 ```
+
 #### Set Request
 
 ```json
@@ -554,7 +584,7 @@ Provides access to the single WiFi conifguration.
     "method": "WifiControl.1.config@MyCorporateNetwork",
     "params": {
         "ssid": "MyCorporateNetwork",
-        "type": "WPA",
+        "type": "WPA_WPA2",
         "hidden": false,
         "accesspoint": true,
         "psk": "secretpresharedkey",
@@ -564,6 +594,7 @@ Provides access to the single WiFi conifguration.
     }
 }
 ```
+
 #### Set Response
 
 ```json
@@ -573,6 +604,7 @@ Provides access to the single WiFi conifguration.
     "result": "null"
 }
 ```
+
 <a name="property.debug"></a>
 ## *debug <sup>property</sup>*
 
@@ -604,6 +636,7 @@ Provides access to the sets debug level.
     "params": 0
 }
 ```
+
 #### Set Response
 
 ```json
@@ -613,10 +646,11 @@ Provides access to the sets debug level.
     "result": "null"
 }
 ```
+
 <a name="head.Notifications"></a>
 # Notifications
 
-Notifications are autonomous events, triggered by the internals of the plugin, and broadcasted via JSON-RPC to all registered observers. Refer to [[Thunder](#ref.Thunder)] for information on how to register for a notification.
+Notifications are autonomous events, triggered by the internals of the implementation, and broadcasted via JSON-RPC to all registered observers. Refer to [[Thunder](#ref.Thunder)] for information on how to register for a notification.
 
 The following events are provided by the WifiControl plugin:
 
@@ -625,8 +659,9 @@ WifiControl interface events:
 | Event | Description |
 | :-------- | :-------- |
 | [scanresults](#event.scanresults) | Signals that the scan operation has finished |
-| [networkchange](#event.networkchange) | Signals that a network property has changed  |
-| [connectionchange](#event.connectionchange) | Notifies about connection state change  |
+| [networkchange](#event.networkchange) | Signals that a network property has changed |
+| [connectionchange](#event.connectionchange) | Notifies about connection state change |
+
 
 <a name="event.scanresults"></a>
 ## *scanresults <sup>event</sup>*
@@ -673,10 +708,11 @@ Signals that the scan operation has finished.
     ]
 }
 ```
+
 <a name="event.networkchange"></a>
 ## *networkchange <sup>event</sup>*
 
-Signals that a network property has changed (e.g. frequency).
+Signals that a network property has changed. e.g. frequency.
 
 ### Parameters
 
@@ -690,10 +726,11 @@ This event carries no parameters.
     "method": "client.events.1.networkchange"
 }
 ```
+
 <a name="event.connectionchange"></a>
 ## *connectionchange <sup>event</sup>*
 
-Notifies about connection state change (i.e. connected/disconnected).
+Notifies about connection state change. i.e. connected/disconnected.
 
 ### Parameters
 
@@ -710,3 +747,4 @@ Notifies about connection state change (i.e. connected/disconnected).
     "params": "MyCorporateNetwork"
 }
 ```
+

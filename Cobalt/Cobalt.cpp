@@ -39,9 +39,11 @@ static Core::ProxyPoolType<Web::JSONBodyType<Cobalt::Data>> jsonBodyDataFactory(
 
     ASSERT(_service == nullptr);
     ASSERT(_cobalt == nullptr);
+    ASSERT(_application == nullptr);
     ASSERT(_memory == nullptr);
 
     config.FromString(service->ConfigLine());
+    _persistentStoragePath = service->PersistentPath();
 
     _connectionId = 0;
     _service = service;
@@ -63,16 +65,26 @@ static Core::ProxyPoolType<Web::JSONBodyType<Cobalt::Data>> jsonBodyDataFactory(
             _cobalt->Release();
             _cobalt = nullptr;
         } else {
+            _application = _cobalt->QueryInterface<Exchange::IApplication>();
+            if (_application != nullptr) {
 
-            RPC::IRemoteConnection* remoteConnection = _service->RemoteConnection(_connectionId);
-            _memory = WPEFramework::Cobalt::MemoryObserver(remoteConnection);
-            ASSERT(_memory != nullptr);
-            remoteConnection->Release();
+                RPC::IRemoteConnection* remoteConnection = _service->RemoteConnection(_connectionId);
+                _memory = WPEFramework::Cobalt::MemoryObserver(remoteConnection);
+                ASSERT(_memory != nullptr);
+                remoteConnection->Release();
 
-            _cobalt->Register(&_notification);
-            stateControl->Register(&_notification);
-            stateControl->Configure(_service);
-            stateControl->Release();
+                _cobalt->Register(&_notification);
+                stateControl->Register(&_notification);
+                stateControl->Configure(_service);
+                stateControl->Release();
+
+                RegisterAll();
+                Exchange::JApplication::Register(*this, _application);
+            } else {
+                stateControl->Release();
+                _cobalt->Release();
+                _cobalt = nullptr;
+            }
         }
     }
 
@@ -89,7 +101,11 @@ static Core::ProxyPoolType<Web::JSONBodyType<Cobalt::Data>> jsonBodyDataFactory(
 /* virtual */void Cobalt::Deinitialize(PluginHost::IShell *service) {
     ASSERT(_service == service);
     ASSERT(_cobalt != nullptr);
+    ASSERT(_application != nullptr);
     ASSERT(_memory != nullptr);
+
+    Exchange::JApplication::Unregister(*this);
+    UnregisterAll();
 
     PluginHost::IStateControl *stateControl(
             _cobalt->QueryInterface<PluginHost::IStateControl>());
@@ -99,6 +115,7 @@ static Core::ProxyPoolType<Web::JSONBodyType<Cobalt::Data>> jsonBodyDataFactory(
     _service->Unregister(&_notification);
     _cobalt->Unregister(&_notification);
     _memory->Release();
+    _application->Release();
 
     // In case Cobalt crashed, there is no access to the statecontrol interface,
     // check it !!
@@ -156,6 +173,8 @@ static Core::ProxyPoolType<Web::JSONBodyType<Cobalt::Data>> jsonBodyDataFactory(
             PluginHost::IStateControl *stateControl(
                     _cobalt->QueryInterface<PluginHost::IStateControl>());
             if (stateControl != nullptr) {
+                result->ErrorCode = Web::STATUS_OK;
+                result->Message = "OK";
                 if (index.Remainder() == _T("Suspend")) {
                     stateControl->Request(PluginHost::IStateControl::SUSPEND);
                 } else if (index.Remainder() == _T("Resume")) {
@@ -165,6 +184,9 @@ static Core::ProxyPoolType<Web::JSONBodyType<Cobalt::Data>> jsonBodyDataFactory(
                         && (request.Body<const Data>()->URL.Value().empty()
                                 == false)) {
                     _cobalt->SetURL(request.Body<const Data>()->URL.Value());
+                } else {
+                    result->ErrorCode = Web::STATUS_BAD_REQUEST;
+                    result->Message = "Unknown error";
                 }
                 stateControl->Release();
             }
@@ -201,6 +223,22 @@ void Cobalt::Hidden(const bool hidden) {
     _service->Notify(message);
 
     event_visibilitychange(hidden);
+}
+
+uint32_t Cobalt::DeleteDir(const string& path)
+{
+    uint32_t result = Core::ERROR_NONE;
+
+    if (path.empty() == false) {
+        string fullPath = _persistentStoragePath + path;
+        Core::Directory dir(fullPath.c_str());
+        if (!dir.Destroy(true)) {
+            TRACE(Trace::Error, (_T("Failed to delete %s\n"), fullPath.c_str()));
+            result = Core::ERROR_UNKNOWN_KEY;
+        }
+    }
+
+    return result;
 }
 
 void Cobalt::StateChange(const PluginHost::IStateControl::state state) {

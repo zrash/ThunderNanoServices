@@ -18,6 +18,9 @@
 set(PLUGIN_NAME NetworkControl)
 set(MODULE_NAME ${NAMESPACE}${PLUGIN_NAME})
 
+set(PLUGIN_NETWORKCONTROL_DHCP_RESONSE_TIMEOUT 5 CACHE STRING "Timeout per request to get a DHCP lease")
+set(PLUGIN_NETWORKCONTROL_DHCP_RETRIES 4 CACHE STRING "Times to retry to get a DHCP lease")
+
 find_package(${NAMESPACE}Plugins REQUIRED)
 find_package(${NAMESPACE}Definitions REQUIRED)
 find_package(CompileSettingsDebug CONFIG REQUIRED)
@@ -25,7 +28,7 @@ find_package(CompileSettingsDebug CONFIG REQUIRED)
 add_library(${MODULE_NAME} SHARED
     NetworkControl.cpp
     NetworkControlJsonRpc.cpp
-    DHCPClientImplementation.cpp
+    DHCPClient.cpp
     Module.cpp)
 
 set_target_properties(${MODULE_NAME} PROPERTIES

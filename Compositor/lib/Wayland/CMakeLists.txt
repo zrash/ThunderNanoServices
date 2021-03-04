@@ -20,7 +20,19 @@ set(TARGET ${PLATFORM_COMPOSITOR})
 message("Setup ${TARGET} v${VERSION}...")
 
 if (PLUGIN_COMPOSITOR_NXSERVER)
-add_subdirectory (NexusServer)
+if (COMPOSITOR_WAYLAND_IMPLEMENTATION_PATH)
+    add_subdirectory (${COMPOSITOR_WAYLAND_IMPLEMENTATION_PATH})
+else()
+    include(GetExternalCode)
+    set(COMPOSITOR_WAYLAND_IMPLEMENTATION_VERSION "master" CACHE STRING "Compositor wayland implementation version")
+    set(COMPOSITOR_WAYLAND_IMPLEMENTATION_REPOSITORY "https://code.rdkcentral.com/r/soc/broadcom/components/rdkcentral/thundernanoservices/Compositor" CACHE STRING "Compositor wayland implementation repository")
+    GetExternalCode(
+        GIT_REPOSITORY ${COMPOSITOR_WAYLAND_IMPLEMENTATION_REPOSITORY}
+        GIT_TAG ${COMPOSITOR_WAYLAND_IMPLEMENTATION_VERSION}
+        SOURCE_DIR "Nexus"
+    )
+    add_subdirectory (Nexus/NexusServer)
+endif()
 endif ()
 
 # add the platformplugin library
@@ -89,6 +101,14 @@ if(WESTEROS_SERVER_FOUND)
         PRIVATE
             WesterosServer::WesterosServer
     )
+
+    find_package(BCM_HOST QUIET)
+    if (NOT BCM_HOST_FOUND)
+        target_compile_definitions(${TARGET}
+            PRIVATE
+                RESOLUTION_SUPPORT=1)
+    endif(NOT BCM_HOST_FOUND)
+
 endif(WESTEROS_SERVER_FOUND)
 
 if(PLUGIN_COMPOSITOR_VIRTUALINPUT)

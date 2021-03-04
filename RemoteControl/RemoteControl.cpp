@@ -162,7 +162,6 @@ namespace Plugin {
             result = "Could not configure remote control.";
         } else {
             TRACE(Trace::Information, (_T("Opening default map file: %s"), mappingFile.c_str()));
-            TRACE_L1(_T("Opening default map file: %s"), mappingFile.c_str());
 
             // Keep this path for save operation
             _persistentPath = service->PersistentPath();
@@ -193,7 +192,7 @@ namespace Plugin {
                 string producer((*index)->Name());
                 string loadName(producer);
 
-                TRACE_L1(_T("Searching map file for: %s"), loadName.c_str());
+                TRACE(Trace::Information, (_T("Searching map file for: %s"), loadName.c_str()));
 
                 configList.Reset();
 
@@ -215,7 +214,6 @@ namespace Plugin {
                 if ((specific.empty() == false) && (specific != mappingFile)) {
 
                     TRACE(Trace::Information, (_T("Opening map file: %s"), specific.c_str()));
-                    TRACE_L1(_T("Opening map file: %s"), specific.c_str());
 
                     // Get our selves a table..
                     PluginHost::VirtualInput::KeyMap& map(_inputHandler->Table(producer.c_str()));
@@ -241,7 +239,6 @@ namespace Plugin {
 
                 if ((specific.empty() == false) && (specific != mappingFile)) {
                     TRACE(Trace::Information, (_T("Opening map file: %s"), specific.c_str()));
-                    TRACE_L1(_T("Opening map file: %s"), specific.c_str());
 
                     // Get our selves a table..de
                     PluginHost::VirtualInput::KeyMap& map(_inputHandler->Table(configList.Current().Name.Value()));
@@ -250,6 +247,13 @@ namespace Plugin {
                 }
 
                 _virtualDevices.push_back(configList.Current().Name.Value());
+            }
+
+            if (config.PostLookupFile.IsSet() == true) {
+                string mappingFile(MappingFile(config.PostLookupFile.Value(), service->PersistentPath(), service->DataPath()));
+                if (mappingFile.empty() == false) {
+                    _inputHandler->PostLookup(EMPTY_STRING, mappingFile);
+                }
             }
 
             auto postLookup(config.Links.Elements());
@@ -262,9 +266,8 @@ namespace Plugin {
             }
 
             _skipURL = static_cast<uint32_t>(service->WebPrefix().length());
-            _inputHandler->Interval(config.RepeatStart.Value(), config.RepeatInterval.Value());
             uint16_t repeatLimit = ((config.ReleaseTimeout.Value() - config.RepeatStart.Value()) / config.RepeatInterval.Value()) + 1;
-            _inputHandler->RepeatLimit(repeatLimit);
+            _inputHandler->Interval(config.RepeatStart.Value(), config.RepeatInterval.Value(), repeatLimit);
             _inputHandler->Default(DefaultMappingTable);
             admin.Callback(static_cast<IKeyHandler*>(this));
             admin.Callback(static_cast<IWheelHandler*>(this));

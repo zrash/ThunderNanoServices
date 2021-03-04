@@ -19,42 +19,55 @@ set(PLUGIN_NAME DIALServer)
 set(MODULE_NAME ${NAMESPACE}${PLUGIN_NAME})
 
 find_package(${NAMESPACE}Plugins REQUIRED)
+find_package(${NAMESPACE}Definitions REQUIRED)
 find_package(CompileSettingsDebug CONFIG REQUIRED)
+
 
 option(PLUGIN_DIALSERVER_ENABLE_YOUTUBE "Enable YouTube support for DIAL server" OFF)
 option(PLUGIN_DIALSERVER_ENABLE_NETFLIX "Enable Netflix support for DIAL server" OFF)
+option(PLUGIN_DIALSERVER_ENABLE_AMAZON_PRIME "Enable Amazon Prime support for DIAL server" OFF)
 
 set(PLUGIN_DIALSERVER_YOUTUBE_MODE "passive" CACHE STRING "How the DIAL server should process incomming requests from Youtube (passive/active), leave empty to disable")
 set(PLUGIN_DIALSERVER_NETFLIX_MODE "passive" CACHE STRING "How the DIAL server should process incomming requests from Netflix (passive/active), leave empty to disable")
+set(PLUGIN_DIALSERVER_AMAZON_PRIME_MODE "passive" CACHE STRING "How the DIAL server should process incomming requests from Amazon Prime (passive/active), leave empty to disable")
+
+set(PLUGIN_DIALSERVER_YOUTUBE_RUNTIMECHANGE true CACHE STRING "Enable runtime change for YouTube")
 
 set(PLUGIN_DIALSERVER_SWITCHBOARD_CALLSIGN "" CACHE STRING "Callsign of the SwitchBoard plugin if used, leave empty to disable")
 set(PLUGIN_DIALSERVER_WEBSERVER_CALLSIGN "" CACHE STRING "Callsign of the WebServer plugin if used, leave empty to disable")
 set(PLUGIN_DIALSERVER_NETFLIX_CALLSIGN "" CACHE STRING "Callsign of the Netflix plugin if used in active mode, leave empty to disable")
 set(PLUGIN_DIALSERVER_YOUTUBE_CALLSIGN "" CACHE STRING "Callsign of the Youtube plugin if used in active mode, leave empty to disable")
+set(PLUGIN_DIALSERVER_AMAZON_PRIME_CALLSIGN "" CACHE STRING "Callsign of the Youtube plugin if used in active mode, leave empty to disable")
+
+set(PLUGIN_DIALSERVER_NETFLIX_HIDE "false" CACHE STRING "Whether target service can be hidden")
 
 set(PLUGIN_DIALSERVER_NAME "${MODULE_NAME}" CACHE STRING "DIAL server name")
+set(PLUGIN_DIALSERVER_MODEL "Generic Platform" CACHE STRING "Model of the device")
+set(PLUGIN_DIALSERVER_MANUFACTURER "Metrological" CACHE STRING "Manufacturer of device")
+set(PLUGIN_DIALSERVER_DESCRIPTION "Metrological DIAL reference server." CACHE STRING "Description")
 
 add_library(${MODULE_NAME} SHARED
     DIALServer.cpp
     DIALServerJsonRpc.cpp
     Module.cpp)
 
-if(PLUGIN_DIALSERVER_ENABLE_YOUTUBE)
+if(PLUGIN_DIALSERVER_ENABLE_YOUTUBE AND "${PLUGIN_DIALSERVER_YOUTUBE_MODE}" STREQUAL "active")
     target_sources(${MODULE_NAME}
         PRIVATE
             YouTube.cpp)
 endif()
 
-if(PLUGIN_DIALSERVER_ENABLE_NETFLIX)
-    target_sources(${MODULE_NAME}
+if(PLUGIN_DIALSERVER_ENABLE_AMAZON_PRIME AND "${PLUGIN_DIALSERVER_AMAZON_PRIME_MODE}" STREQUAL "active")
+target_sources(${MODULE_NAME}
         PRIVATE
-            Netflix.cpp)
+            AmazonPrime.cpp)
 endif()
 
 target_link_libraries(${MODULE_NAME}
     PRIVATE
         CompileSettingsDebug::CompileSettingsDebug
-        ${NAMESPACE}Plugins::${NAMESPACE}Plugins)
+        ${NAMESPACE}Plugins::${NAMESPACE}Plugins
+        ${NAMESPACE}Definitions::${NAMESPACE}Definitions)
 
 install(TARGETS ${MODULE_NAME}
     DESTINATION lib/${STORAGE_DIRECTORY}/plugins)

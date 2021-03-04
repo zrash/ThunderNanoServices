@@ -15,7 +15,23 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-add_subdirectory (${PLUGIN_COMPOSITOR_IMPLEMENTATION})
+if("${PLUGIN_COMPOSITOR_IMPLEMENTATION}" STREQUAL "Nexus")
+    if (COMPOSITOR_IMPLEMENTATION_PATH)
+        add_subdirectory(${COMPOSITOR_IMPLEMENTATION_PATH})
+    else()
+        include(GetExternalCode)
+        set(COMPOSITOR_IMPLEMENTATION_VERSION "master" CACHE STRING "Compositor implementation version")
+        set(COMPOSITOR_IMPLEMENTATION_REPOSITORY "https://code.rdkcentral.com/r/soc/broadcom/components/rdkcentral/thundernanoservices/Compositor" CACHE STRING "Compositor implementation repository")
+        GetExternalCode(
+            GIT_REPOSITORY ${COMPOSITOR_IMPLEMENTATION_REPOSITORY}
+            GIT_TAG ${COMPOSITOR_IMPLEMENTATION_VERSION}
+            SOURCE_DIR "Nexus"
+        )
+        add_subdirectory(Nexus)
+    endif()
+else()
+    add_subdirectory (${PLUGIN_COMPOSITOR_IMPLEMENTATION})
+endif()
 
 if(PLUGIN_COMPOSITOR_TEST)
     add_subdirectory (Test)

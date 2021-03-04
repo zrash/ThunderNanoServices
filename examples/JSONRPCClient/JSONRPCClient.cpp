@@ -22,7 +22,9 @@
 #include <core/core.h>
 #include <tracing/tracing.h>
 #include <websocket/websocket.h>
+#ifdef ENABLE_SECURITY_AGENT
 #include <securityagent/securityagent.h>
+#endif
 #include <interfaces/IPerformance.h>
 #include <interfaces/IMath.h>
 
@@ -125,14 +127,19 @@ void ShowMenu()
            "\tE : Invoke and exchange an opaque variant JSON parameter\n"
            "\tC : Callback, using a static method, wait for a response from the otherside a-synchronously\n"
            "\tG : Callback, using a class method, wait for a response from the otherside a-synchronously\n"
+           "\tK : Test server side Validation\n" 
            "\tD : Demonstrating the possibilities with JsonObject\n\n"
            "\tX : Measure COM Performance\n"
            "\tY : Measure JSONRPC performance\n"
            "\tZ : Measure MessagePack performance\n"
+           "\t@ : Demonstrate arithmetic Addition/Subtraction using IMath interface\n"
            "\tL : Legacy invoke on version 1 clueless...\n"
+           "\tN : Invoke on version 2 clueless...\n"
            "\t+ : Register for a-synchronous events on Version 1 interface\n"
            "\t- : Unregister for a-synchronous events on Version 1 interface\n"
+#ifdef ENABLE_SECURITY_AGENT
            "\tA : Get a JSONWebToken for the set URL\n"
+#endif
            "\tH : Help\n"
            "\tQ : Quit\n");
 }
@@ -180,7 +187,7 @@ class MessageHandler {
 public:
     explicit MessageHandler(const string& recipient)
         : _recipient(recipient)
-        , _remoteObject(_T("JSONRPCPlugin.1"), (recipient + _T(".client.events")).c_str()) {
+        , _remoteObject(_T("JSONRPCPlugin.2"), (recipient + _T(".client.events")).c_str()) {
     }
 
     void message_received(const Core::JSON::String& message) {
@@ -755,6 +762,16 @@ int main(int argc, char** argv)
             case '@':
             {
                 Exchange::IMath* math = client->Aquire<Exchange::IMath>(2000, _T("JSONRPCPlugin"), ~0);
+                if (math != nullptr) {
+                    uint16_t A = 10;
+                    uint16_t B = 5;
+                    uint16_t Sum = 0;
+                    math->Add(A, B, Sum);
+                    printf("Sum of %d & %d using IMath::Add = %d\n", A, B, Sum);
+                    math->Sub(A, B, Sum);
+                    printf("Diff of %d & %d using IMath::Sub = %d\n", A, B, Sum);
+                }
+                break;
             }
             case 'X':
             {
@@ -780,6 +797,13 @@ int main(int argc, char** argv)
                  }
                  break;
             }
+            case 'K': {
+                // the following call is supposed to fail as it will not pass server side validation
+                Core::JSON::String result;
+                uint32_t errorcode = remoteObject.Invoke<void, Core::JSON::String>(1000, _T("checkvalidation"), result);
+                printf("Check server side validation: [%s], code = %s\n", result.Value().c_str(), Core::ErrorToString(errorcode));
+                break;
+            }
             case 'L':
             {
                 // !!!!!!!!! calling the clueless method on INTERFACE VERSION 1 !!!!!!!!!!!!!!!!!!!!!!!!!!
@@ -792,7 +816,13 @@ int main(int argc, char** argv)
                 Core::JSON::String result;
                 result = _T("This should be an eche server on interface 1");
                 legacyObject.Invoke<Core::JSON::String, Core::JSON::String>(1000, _T("clueless"), result, result);
-                printf("received time: %s\n", result.Value().c_str());
+                printf("received message: %s\n", result.Value().c_str());
+                break;
+            }
+            case 'N':
+            {
+                // calling the clueless method on INTERFACE VERSION 2
+                remoteObject.Invoke<void, void>(1000, _T("clueless"));
                 break;
             }
             case '+':
@@ -819,6 +849,7 @@ int main(int argc, char** argv)
                 printf("Unregistered and removed all notification handlers\n");
                 break;
 
+#ifdef ENABLE_SECURITY_AGENT
             case 'A': {
 
                 int length;
@@ -839,6 +870,7 @@ int main(int argc, char** argv)
                 }
                 break;
             }
+#endif
             case '?':
             case 'H':
                 ShowMenu();

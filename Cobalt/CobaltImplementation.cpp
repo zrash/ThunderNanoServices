@@ -20,8 +20,9 @@
 #include "Module.h"
 #include <interfaces/IMemory.h>
 #include <interfaces/IBrowser.h>
+#include <interfaces/IApplication.h>
+#include <locale.h>
 
-#include "starboard/export.h"
 #include "third_party/starboard/wpe/shared/cobalt_api_wpe.h"
 
 extern int StarboardMain(int argc, char **argv);
@@ -31,29 +32,85 @@ namespace Plugin {
 
 class CobaltImplementation:
         public Exchange::IBrowser,
+        public Exchange::IApplication,
         public PluginHost::IStateControl {
+public:
+    enum connection {
+        CABLE,
+        WIRELESS
+    };
+
 private:
     class Config: public Core::JSON::Container {
-    private:
-        Config(const Config&);
-        Config& operator=(const Config&);
-
     public:
-        Config() :
-            Core::JSON::Container(), Url() {
+        Config(const Config&) = delete;
+        Config& operator=(const Config&) = delete;
+
+        Config()
+            : Core::JSON::Container()
+            , Url()
+            , Inspector()
+            , Width(1280)
+            , Height(720)
+            , RepeatStart()
+            , RepeatInterval()
+            , ClientIdentifier()
+            , ManufacturerName()
+            , ChipsetModelNumber()
+            , FirmwareVersion()
+            , ModelName()
+            , ModelYear()
+            , OperatorName()
+            , FriendlyName()
+            , CertificationScope()
+            , CertificationSecret()
+            , Language()
+            , Connection(CABLE)
+            , PlaybackRates(true)
+        {
             Add(_T("url"), &Url);
+            Add(_T("inspector"), &Inspector);
             Add(_T("width"), &Width);
             Add(_T("height"), &Height);
+            Add(_T("repeatstart"), &RepeatStart);
+            Add(_T("repeatinterval"), &RepeatInterval);
             Add(_T("clientidentifier"), &ClientIdentifier);
+            Add(_T("manufacturername"), &ManufacturerName);
+            Add(_T("chipsetmodelnumber"), &ChipsetModelNumber);
+            Add(_T("firmwareversion"), &FirmwareVersion);
+            Add(_T("modelname"), &ModelName);
+            Add(_T("modelyear"), &ModelYear);
+            Add(_T("operatorname"), &OperatorName);
+            Add(_T("friendlyname"), &FriendlyName);
+            Add(_T("scope"), &CertificationScope);
+            Add(_T("secret"), &CertificationSecret);
+            Add(_T("language"), &Language);
+            Add(_T("connection"), &Connection);
+            Add(_T("playbackrates"), &PlaybackRates);
         }
         ~Config() {
         }
 
     public:
         Core::JSON::String Url;
+        Core::JSON::String Inspector;
         Core::JSON::DecUInt16 Width;
         Core::JSON::DecUInt16 Height;
+        Core::JSON::DecUInt32 RepeatStart;
+        Core::JSON::DecUInt32 RepeatInterval;
         Core::JSON::String ClientIdentifier;
+        Core::JSON::String ManufacturerName;
+        Core::JSON::String ChipsetModelNumber;
+        Core::JSON::String FirmwareVersion;
+        Core::JSON::String ModelName;
+        Core::JSON::String ModelYear;
+        Core::JSON::String OperatorName;
+        Core::JSON::String FriendlyName;
+        Core::JSON::String CertificationScope;
+        Core::JSON::String CertificationSecret;
+        Core::JSON::String Language;
+        Core::JSON::EnumType<connection> Connection;
+        Core::JSON::Boolean PlaybackRates;
     };
 
     class NotificationSink: public Core::Thread {
@@ -106,6 +163,9 @@ private:
         CobaltWindow()
             : Core::Thread(0, _T("Cobalt"))
             , _url{"https://www.youtube.com/tv"}
+            , _language()
+            , _debugListenIp("0.0.0.0")
+            , _debugPort()
         {
         }
         virtual ~CobaltWindow()
@@ -142,8 +202,75 @@ private:
                 Core::SystemInfo::SetEnvironment(_T("GST_VIRTUAL_DISP_HEIGHT"), height);
             }
 
+            if (config.RepeatStart.IsSet() == true) {
+                string repeatStart(Core::NumberType<uint32_t>(config.RepeatStart.Value()).Text());
+                Core::SystemInfo::SetEnvironment(_T("COBALT_KEY_REPEAT_START"), repeatStart);
+            }
+
+            if (config.RepeatInterval.IsSet() == true) {
+                string repeatInterval(Core::NumberType<uint32_t>(config.RepeatInterval.Value()).Text());
+                Core::SystemInfo::SetEnvironment(_T("COBALT_KEY_REPEAT_INTERVAL"), repeatInterval);
+            }
+
+            if (config.ManufacturerName.IsSet() == true) {
+                Core::SystemInfo::SetEnvironment(_T("COBALT_MANUFACTURER_NAME"), config.ManufacturerName.Value());
+            }
+
+            if (config.ChipsetModelNumber.IsSet() == true) {
+                Core::SystemInfo::SetEnvironment(_T("COBALT_CHIPSET_MODEL_NUMBER"), config.ChipsetModelNumber.Value());
+            }
+
+            if (config.FirmwareVersion.IsSet() == true) {
+                Core::SystemInfo::SetEnvironment(_T("COBALT_FIRMWARE_VERSION"), config.FirmwareVersion.Value());
+            }
+
+            if (config.ModelName.IsSet() == true) {
+                Core::SystemInfo::SetEnvironment(_T("COBALT_MODEL_NAME"), config.ModelName.Value());
+            }
+
+            if (config.ModelYear.IsSet() == true) {
+                Core::SystemInfo::SetEnvironment(_T("COBALT_MODEL_YEAR"), config.ModelYear.Value());
+            }
+
+            if (config.OperatorName.IsSet() == true) {
+                Core::SystemInfo::SetEnvironment(_T("COBALT_OPERATOR_NAME"), config.OperatorName.Value());
+            }
+
+            if (config.FriendlyName.IsSet() == true) {
+                Core::SystemInfo::SetEnvironment(_T("COBALT_FRIENDLY_NAME"), config.FriendlyName.Value());
+            }
+
+            if (config.CertificationScope.IsSet() == true) {
+                Core::SystemInfo::SetEnvironment(_T("COBALT_CERTIFICATION_SCOPE"), config.CertificationScope.Value());
+            }
+
+            if (config.CertificationSecret.IsSet() == true) {
+                Core::SystemInfo::SetEnvironment(_T("COBALT_CERTIFICATION_SECRET"), config.CertificationSecret.Value());
+            }
+
+            if (config.Language.IsSet() == true) {
+                Language(config.Language.Value());
+            }
+
+            if ( (config.Connection.IsSet() == true) && (config.Connection == CobaltImplementation::connection::WIRELESS) ) {
+                Core::SystemInfo::SetEnvironment(_T("COBALT_CONNECTION_TYPE"), _T("wireless"));
+            }
+
+            if ( (config.PlaybackRates.IsSet() == true) && (config.PlaybackRates.Value() == false) ) {
+                Core::SystemInfo::SetEnvironment(_T("COBALT_SUPPORT_PLAYBACK_RATES"), _T("false"));
+            }
+
             if (config.Url.IsSet() == true) {
-              _url = config.Url.Value();
+                _url = config.Url.Value();
+            }
+
+            if (config.Inspector.Value().empty() == false) {
+                string url(config.Inspector.Value());
+                auto pos = url.find(":");
+                if (pos != std::string::npos) {
+                    _debugListenIp = url.substr(0, pos);
+                    _debugPort = static_cast<uint16_t>(std::atoi(url.substr(pos + 1).c_str()));
+                }
             }
 
             Run();
@@ -153,18 +280,24 @@ private:
         bool Suspend(const bool suspend)
         {
             if (suspend == true) {
-                kill(getpid(), SIGUSR1);
+                third_party::starboard::wpe::shared::Suspend();
             }
             else {
-                kill(getpid(), SIGCONT);
+                third_party::starboard::wpe::shared::Resume();
             }
             return (true);
         }
 
-        string Url() const { return _url; }
+        inline string Url() const { return _url; }
+        inline void Language(string& language) const { language = _language; }
+        inline void Language(const string& language) {
+            Core::SystemInfo::SetEnvironment(_T("LANG"), language.c_str());
+            Core::SystemInfo::SetEnvironment(_T("LANGUAGE"), language.c_str());
+            _language = language;
+        }
 
     private:
-        bool Initialize() override
+        uint32_t Initialize() override
         {
             sigset_t mask;
             sigemptyset(&mask);
@@ -172,19 +305,24 @@ private:
             sigaddset(&mask, SIGUSR1);
             sigaddset(&mask, SIGCONT);
             pthread_sigmask(SIG_UNBLOCK, &mask, nullptr);
-            return (true);
+            return Core::ERROR_NONE;
         }
         uint32_t Worker() override
         {
             const std::string cmdURL = "--url=" + _url;
-            const char* argv[] = {"Cobalt", cmdURL.c_str()};
+            const std::string cmdDebugListenIp = "--dev_servers_listen_ip=" + _debugListenIp;
+            const std::string cmdDebugPort = "--remote_debugging_port=" + std::to_string(_debugPort);
+            const char* argv[] = {"Cobalt", cmdURL.c_str(), cmdDebugListenIp.c_str(), cmdDebugPort.c_str()};
             while (IsRunning() == true) {
-                StarboardMain(2, const_cast<char**>(argv));
+                StarboardMain(4, const_cast<char**>(argv));
             }
             return (Core::infinite);
         }
 
         string _url;
+        string _language;
+        string _debugListenIp;
+        uint16_t _debugPort;
     };
 
 private:
@@ -193,19 +331,32 @@ private:
 
 public:
     CobaltImplementation() :
+            _language(),
             _adminLock(),
             _state(PluginHost::IStateControl::UNINITIALIZED),
-            _cobaltClients(),
+            _cobaltBrowserClients(),
             _stateControlClients(),
-            _sink(*this) {
+            _sink(*this),
+            _service(nullptr) {
     }
 
     virtual ~CobaltImplementation() {
+        if (_service) {
+            _service->Release();
+            _service = nullptr;
+        }
     }
 
     virtual uint32_t Configure(PluginHost::IShell *service) {
         uint32_t result = _window.Configure(service);
-        _state = PluginHost::IStateControl::RESUMED;
+        _window.Suspend(!service->Resumed());
+        _state = (!service->Resumed()) ? PluginHost::IStateControl::SUSPENDED : PluginHost::IStateControl::RESUMED;
+
+        _service = service;
+        if (_service) {
+            _service->AddRef();
+        }
+
         return (result);
     }
 
@@ -228,11 +379,10 @@ public:
         _adminLock.Lock();
 
         // Make sure a sink is not registered multiple times.
-        ASSERT(
-                std::find(_cobaltClients.begin(), _cobaltClients.end(), sink)
-                        == _cobaltClients.end());
+        ASSERT(std::find(_cobaltBrowserClients.begin(), _cobaltBrowserClients.end(), sink)
+               == _cobaltBrowserClients.end());
 
-        _cobaltClients.push_back(sink);
+        _cobaltBrowserClients.push_back(sink);
         sink->AddRef();
 
         _adminLock.Unlock();
@@ -242,17 +392,102 @@ public:
         _adminLock.Lock();
 
         std::list<Exchange::IBrowser::INotification*>::iterator index(
-                std::find(_cobaltClients.begin(), _cobaltClients.end(), sink));
+                std::find(_cobaltBrowserClients.begin(), _cobaltBrowserClients.end(), sink));
 
         // Make sure you do not unregister something you did not register !!!
-        ASSERT(index != _cobaltClients.end());
+        ASSERT(index != _cobaltBrowserClients.end());
 
-        if (index != _cobaltClients.end()) {
+        if (index != _cobaltBrowserClients.end()) {
             (*index)->Release();
-            _cobaltClients.erase(index);
+            _cobaltBrowserClients.erase(index);
         }
 
         _adminLock.Unlock();
+    }
+
+    void Register(Exchange::IApplication::INotification* sink) override {
+        // Kept empty since visibility change is not supported
+    }
+
+    void Unregister(Exchange::IApplication::INotification* sink) override {
+        // Kept empty since visibility change is not supported
+    }
+
+    uint32_t Reset(const resettype type) override {
+
+        uint32_t status = Core::ERROR_GENERAL;
+        switch (type) {
+        case FACTORY:
+            if (third_party::starboard::wpe::shared::Reset(third_party::starboard::wpe::shared::ResetType::kFactory) == true) {
+                status = Core::ERROR_NONE;
+            }
+            break;
+        case CACHE:
+            if (third_party::starboard::wpe::shared::Reset(third_party::starboard::wpe::shared::ResetType::kCache) == true) {
+                status = Core::ERROR_NONE;
+            }
+            break;
+        case CREDENTIALS:
+            if (third_party::starboard::wpe::shared::Reset(third_party::starboard::wpe::shared::ResetType::kCredentials) == true) {
+                status = Core::ERROR_NONE;
+            }
+            break;
+        default:
+            status = Core::ERROR_NOT_SUPPORTED;
+            break;
+        }
+
+        return status;
+    }
+
+    uint32_t Identifier(string& id) const override {
+
+        const PluginHost::ISubSystem::IIdentifier* identifier(_service->SubSystems()->Get<PluginHost::ISubSystem::IIdentifier>());
+        if (identifier != nullptr) {
+            uint8_t buffer[64];
+
+            buffer[0] = static_cast<const PluginHost::ISubSystem::IIdentifier*>(identifier)
+                        ->Identifier(sizeof(buffer) - 1, &(buffer[1]));
+
+            if (buffer[0] != 0) {
+                id = Core::SystemInfo::Instance().Id(buffer, ~0);
+            }
+
+            identifier->Release();
+        }
+
+        return Core::ERROR_NONE;
+    }
+
+    uint32_t ContentLink(const string& link) override {
+        third_party::starboard::wpe::shared::DeepLink(link.c_str());
+        return Core::ERROR_NONE;
+    }
+
+    uint32_t LaunchPoint(launchpointtype& point) const override {
+        return Core::ERROR_UNAVAILABLE;
+    }
+
+    uint32_t LaunchPoint(const launchpointtype&) override {
+        return Core::ERROR_UNAVAILABLE;
+    }
+
+    uint32_t Visible(bool& visiblity) const override {
+        return Core::ERROR_UNAVAILABLE;
+    }
+
+    uint32_t Visible(const bool& visiblity) override {
+        return Core::ERROR_UNAVAILABLE;
+    }
+
+    uint32_t Language(string& language) const override {
+        _window.Language(language);
+        return Core::ERROR_NONE;
+    }
+
+    uint32_t Language(const string& language) override {
+        _window.Language(language);
+        return Core::ERROR_NONE;
     }
 
     virtual void Register(PluginHost::IStateControl::INotification *sink) {
@@ -296,7 +531,6 @@ public:
         uint32_t result = Core::ERROR_ILLEGAL_STATE;
 
         _adminLock.Lock();
-
         if (_state == PluginHost::IStateControl::UNINITIALIZED) {
             // Seems we are passing state changes before we reached an operational Cobalt.
             // Just move the state to what we would like it to be :-)
@@ -325,7 +559,6 @@ public:
                 break;
             }
         }
-
         _adminLock.Unlock();
 
         return result;
@@ -367,6 +600,7 @@ public:
     BEGIN_INTERFACE_MAP (CobaltImplementation)
         INTERFACE_ENTRY (Exchange::IBrowser)
         INTERFACE_ENTRY (PluginHost::IStateControl)
+        INTERFACE_ENTRY (Exchange::IApplication)
     END_INTERFACE_MAP
 
 private:
@@ -411,12 +645,14 @@ private:
     }
 
 private:
+    string _language;
     CobaltWindow _window;
     mutable Core::CriticalSection _adminLock;
     PluginHost::IStateControl::state _state;
-    std::list<Exchange::IBrowser::INotification*> _cobaltClients;
+    std::list<Exchange::IBrowser::INotification*> _cobaltBrowserClients;
     std::list<PluginHost::IStateControl::INotification*> _stateControlClients;
     NotificationSink _sink;
+    PluginHost::IShell* _service;
 };
 
 SERVICE_REGISTRATION(CobaltImplementation, 1, 0);
@@ -469,4 +705,13 @@ private:
         return (result);
     }
 }
+
+
+ENUM_CONVERSION_BEGIN(Plugin::CobaltImplementation::connection)
+
+    { Plugin::CobaltImplementation::connection::CABLE,    _TXT("cable")    },
+    { Plugin::CobaltImplementation::connection::WIRELESS, _TXT("wireless") },
+
+ENUM_CONVERSION_END(Plugin::CobaltImplementation::connection)
+
 } // namespace

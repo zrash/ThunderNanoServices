@@ -31,31 +31,21 @@ namespace Plugin {
     static const string _DefaultControlExtension(_T("Run"));
     static const string _DefaultAppInfoDevice(_T("DeviceInfo.xml"));
     static const string _DefaultRunningExtension(_T("Running"));
-    static const string _SystemApp(_T("system"));
+    static const string _DefaultHiddenExtension(_T("Hidden"));
+    static const string _ClientFriendlyName = (_T("friendlyName"));
 
-    constexpr char kHideCommand[] = "hide";
-    static const string kVersionSupportedByClientQueryKey(_T("clientDialVer"));
-    static const string kClientFriendyNameQueryKey = (_T("friendlyName"));
-    constexpr int kMaxQueryValueLength = 256;
+    constexpr TCHAR _VersionSupportedKey[] = _T("clientDialVer");
+    constexpr TCHAR _HideCommand[] = _T("hide");
 
     static Core::ProxyPoolType<Web::TextBody> _textBodies(5);
 
     /* static */ const Core::NodeId DIALServer::DIALServerImpl::DialServerInterface(_T("239.255.255.250"), 1900);
-    /* static */ std::map<string, DIALServer::IApplicationFactory*> DIALServer::AppInformation::_applicationFactory;
 
     class WebFlow {
-    private:
-        // -------------------------------------------------------------------
-        // This object should not be copied or assigned. Prevent the copy
-        // constructor and assignment constructor from being used. Compiler
-        // generated assignment and copy methods will be blocked by the
-        // following statments.
-        // Define them but do not implement them, compile error/link error.
-        // -------------------------------------------------------------------
+    public:
         WebFlow(const WebFlow& a_Copy) = delete;
         WebFlow& operator=(const WebFlow& a_RHS) = delete;
 
-    public:
         WebFlow(const Core::ProxyType<Web::Request>& request, const Core::NodeId& nodeId)
         {
             if (request.IsValid() == true) {
@@ -72,9 +62,7 @@ namespace Plugin {
                 _text = Core::ToString(string("\n[" + nodeId.HostAddress() + ']' + text + '\n'));
             }
         }
-        ~WebFlow()
-        {
-        }
+        ~WebFlow() = default;
 
     public:
         inline const char* Data() const
@@ -118,6 +106,13 @@ namespace Plugin {
         }
 
         return (index);
+    }
+
+    /* virtual */ uint32_t DIALServer::Default::AdditionalDataURL(string& url) const
+    {
+        const uint16_t port = _parent->WebServerPort();
+        url = (_T("http://localhost") + ((port == 80)? _T("") : _T(":") + Core::NumberType<uint16_t>(port).Text()) + _T("/Service/DIALServer/Apps/") + _callsign + _T("/") + _DefaultDataExtension);
+        return (Core::ERROR_NONE);
     }
 
     DIALServer::DIALServerImpl::DIALServerImpl(const string& MACAddress, const string& baseURL, const string& appPath)
@@ -210,28 +205,36 @@ namespace Plugin {
 
     void DIALServer::AppInformation::GetData(string& data, const Version& version) const
     {
+        static string dialVersion(_T(" dialVer=\"") + Core::NumberType<uint8_t>(DIALServer::DialServerMajor).Text() + _T(".") + Core::NumberType<uint8_t>(DIALServer::DialServerMinor).Text() + _T("\" "));
+
         bool running = IsRunning();
-        bool hidden = HasHideAndShow() == true && IsHidden() == true;
-        bool isAtLeast2_1 = Version{2, 1, 0} <= version;
-        // allowSop is mandatory to be true starting from 2.1
-        string allowStop = isAtLeast2_1 == true || HasStartAndStop() == true ? "true" : "false";
-        string dialVersion;
-        if (isAtLeast2_1 == true) {
-          dialVersion = " dialVer=\"2.1\" ";
+        bool isAtLeast2_1 = version >= Version(2, 1, 0);
+
+        // 2.1 spec adds "hidden" state. It also introduces "installable" state.
+        // We may consider adding support for it at some point - thanks to the Packager.
+        string state;
+        if ((HasHide() == true) && (IsHidden() == true)) {
+            state = (isAtLeast2_1? _T("hidden") : _T("stopped"));
+        } else if (running == true) {
+            state = _T("running");
+        } else {
+            state = _T("stopped");
         }
 
+        // allowStop is mandatory to be true starting from 2.1
+        string allowStop((isAtLeast2_1 == true) || (HasStartAndStop() == true) ? "true" : "false");
+
+        // <link> element is DEPRECATED starting from 2.1!!!!
+        // Although it is deperecated some Cobalt tests are still checking for the presence of this element. Keep on adding it. It does not hurt....
+
         data = _T("<?xml version=\"1.0\" encoding=\"UTF-8\"?>")
-               _T("<service xmlns=\"urn:dial-multiscreen-org:schemas:dial\"") + dialVersion + _T(">")
-               _T("<name>")
-            + Name() + _T("</name>")
-                       _T("<options allowStop=\"")
-            + allowStop + _T("\"/><state>")
-            // 2.2 spec adds "hidden" state. It also introduces "installable" state.
-            // We may consider adding support for it at some point - thanks to the Packager.
-            + (running == true ? (hidden == true && isAtLeast2_1 == true ? _T("hidden") : _T("running")) : _T("stopped")) + _T("</state>")
-            // <link> element is DEPRECATED starting from 2.1
-            + (running == true && isAtLeast2_1 == false ? _T("<link rel=\"run\" href=\"" + _DefaultControlExtension + "\"/>") : _T(""))
-            + _T("<additionalData>");
+            _T("<service xmlns=\"urn:dial-multiscreen-org:schemas:dial\"") + dialVersion + _T(">")
+            _T("<name>") + Name() + _T("</name>")
+            _T("<options allowStop=\"") + allowStop + _T("\"/>")
+            _T("<state>") + state + _T("</state>")
+            _T("<link rel=\"run\" href=\"" + _DefaultControlExtension + "\"/>")
+            _T("<additionalData>");
+
         auto additionalData = AdditionalData();
         if (additionalData.empty() == false) {
             for (const auto& adata : additionalData) {
@@ -239,13 +242,14 @@ namespace Plugin {
                 data += "<" + adata.first + ">"+ adata.second + "</" + adata.first + ">";
             }
         }
+
         data += _T("</additionalData></service>");
     }
 
     void DIALServer::AppInformation::SetData(const string& data)
     {
         TRACE(Trace::Information, (_T("SetData: %s"), data.c_str()));
-        TCHAR* decoded = static_cast<TCHAR*>(ALLOCA(MaxDialQuerySize * sizeof(TCHAR)));
+        TCHAR decoded[MaxDialQuerySize * sizeof(TCHAR)];
 
         IApplication::AdditionalDataType additionalData;
         _lock.Lock();
@@ -278,9 +282,11 @@ namespace Plugin {
         ASSERT(_service == NULL);
 
         _config.FromString(service->ConfigLine());
+        _deprecatedAPI = _config.DeprecatedAPI.Value();
 
         // get an interface with a public IP address, then we will have a proper MAC address..
-        Core::NodeId selectedNode = Plugin::Config::IPV4UnicastNode(_config.Interface.Value());
+        // Core::NodeId selectedNode = Plugin::Config::IPV4UnicastNode(_config.Interface.Value());
+        Core::NodeId selectedNode = Core::NodeId(_config.Interface.Value().c_str());
 
         if (selectedNode.IsValid() == false) {
             // Oops no way we can operate...
@@ -289,14 +295,15 @@ namespace Plugin {
             const uint8_t* rawId(Core::SystemInfo::Instance().RawDeviceId());
             const string deviceId(Core::SystemInfo::Instance().Id(rawId, ~0));
 
-            Core::NodeId source((_config.Interface.Value().empty() == true) || (selectedNode.IsValid() == false) ? selectedNode.AnyInterface() : selectedNode);
-
+            _service = service;
             _dialURL = Core::URL(service->Accessor());
+            _dialURL.Host(selectedNode.HostAddress());
             _dialPath = '/' + _dialURL.Path().Value();
+            _webServerPort = _dialURL.Port().IsSet() ? _dialURL.Port().Value() : 80;
 
             // TODO: THis used to be the MAC, but I think  it is just a unique number, otherwise, we need the MAC
             //       that goes with the selectedNode !!!!
-            _dialServiceImpl = new DIALServerImpl(deviceId, service->Accessor(), _DefaultAppInfoPath);
+            _dialServiceImpl = new DIALServerImpl(deviceId, _dialURL.Text(), _DefaultAppInfoPath);
 
             ASSERT(_dialServiceImpl != nullptr);
 
@@ -304,28 +311,24 @@ namespace Plugin {
 
             (*_deviceInfo) = _T("<?xml version=\"1.0\"?>")
                              _T("<root xmlns=\"urn:schemas-upnp-org:device-1-0\">")
-                             _T("<specVersion>")
-                             _T("<major>1</major>")
-                             _T("<minor>0</minor>")
-                             _T("</specVersion>")
-                             _T("<device>")
-                             _T("<deviceType>urn:schemas-upnp-org:device:tvdevice:1</deviceType>")
-                             _T("<friendlyName>")
-                + _config.Name.Value() + _T("</friendlyName>")
-                                         _T("<manufacturer>")
-                + _config.Manufacturer.Value() + _T("</manufacturer>")
-                + ( _config.ManufacturerURL.IsSet() == true ? _T("<manufacturerURL>") + _config.ManufacturerURL.Value() + _T("</manufacturerURL>") : _T("") )
-                +                                 _T("<modelDescription>")
-                + _config.Description.Value() + _T("</modelDescription>")
-                                                _T("<modelName>")
-                + _config.Model.Value() + _T("</modelName>")
-                + ( _config.ModelNumber.IsSet() == true ? _T("<modelNumber>") + _config.ModelNumber.Value() + _T("</modelNumber>") : _T("") )
-                + ( _config.ModelURL.IsSet() == true ? _T("<modelURL>") + _config.ModelURL.Value() + _T("</modelURL>") : _T("") )
-                + ( _config.SerialNumber.IsSet() == true ? _T("<serialNumber>") + _config.SerialNumber.Value() + _T("</serialNumber>") : _T("") )
-                +                          _T("<UDN>uuid:")
-                + deviceId + _T("</UDN>")
-                + ( _config.UPC.IsSet() == true ? _T("<UPC>") + _config.UPC.Value() + _T("</UPC>") : _T("") )
-                +            _T("</device>")
+                                 _T("<specVersion>")
+                                     _T("<major>") + Core::NumberType<uint8_t>(DialServerMajor).Text() + _T("</major>")
+                                     _T("<minor>") + Core::NumberType<uint8_t>(DialServerMinor).Text() + _T("</minor>")
+                                     _T("<patch>") + Core::NumberType<uint8_t>(DialServerPatch).Text() + _T("</patch>")
+                                 _T("</specVersion>")
+                                 _T("<device>")
+                                     _T("<deviceType>urn:schemas-upnp-org:device:tvdevice:1</deviceType>")
+                                     _T("<friendlyName>") + _config.Name.Value() + _T("</friendlyName>")
+                                     _T("<manufacturer>") + _config.Manufacturer.Value() + _T("</manufacturer>") +
+                                       ( _config.ManufacturerURL.IsSet() == true ? _T("<manufacturerURL>") + _config.ManufacturerURL.Value() + _T("</manufacturerURL>") : _T("") ) +
+                                     _T("<modelDescription>") + _config.Description.Value() + _T("</modelDescription>")
+                                     _T("<modelName>") + _config.Model.Value() + _T("</modelName>") +
+                                       ( _config.ModelNumber.IsSet() == true ? _T("<modelNumber>") + _config.ModelNumber.Value() + _T("</modelNumber>") : _T("") ) +
+                                       ( _config.ModelURL.IsSet() == true ? _T("<modelURL>") + _config.ModelURL.Value() + _T("</modelURL>") : _T("") ) +
+                                       ( _config.SerialNumber.IsSet() == true ? _T("<serialNumber>") + _config.SerialNumber.Value() + _T("</serialNumber>") : _T("") ) +
+                                     _T("<UDN>uuid:") + deviceId + _T("</UDN>") +
+                                       ( _config.UPC.IsSet() == true ? _T("<UPC>") + _config.UPC.Value() + _T("</UPC>") : _T("") ) +
+                                 _T("</device>")
                              _T("</root>");
 
             // Create a list of all servicable Apps:
@@ -337,13 +340,6 @@ namespace Plugin {
                 }
             }
 
-            AppInformation::Announce(_SystemApp, new SystemApplicationFactory);
-            Config::App systemCfg;
-            systemCfg.Name = _SystemApp;
-            _appInfo.emplace(std::piecewise_construct, std::make_tuple(_SystemApp), std::make_tuple(service, systemCfg, this));
-
-            _service = service;
-
             _adminLock.Lock();
 
             // Register the sink *AFTER* the apps have been created so the apps will receive the
@@ -351,6 +347,8 @@ namespace Plugin {
             _sink.Register(service, _config.WebServer.Value(), _config.SwitchBoard.Value());
 
             _adminLock.Unlock();
+
+            RegisterAll();
         }
 
         // On succes return NULL, to indicate there is no error text.
@@ -362,9 +360,9 @@ namespace Plugin {
         ASSERT(_service != NULL);
         ASSERT(_dialServiceImpl != NULL);
 
-        _adminLock.Lock();
+        UnregisterAll();
 
-        AppInformation::Revoke(_SystemApp);
+        _adminLock.Lock();
 
         _sink.Unregister(service);
 
@@ -385,32 +383,29 @@ namespace Plugin {
     }
     /* virtual */ void DIALServer::Inbound(Web::Request& request)
     {
-        if (request.Verb == Web::Request::HTTP_POST) {
-            // This might be a "launch" application thingy, make sure we reive the proper info.
-            request.Body(_textBodies.Element());
-        }
+        // This might be a "launch" application thingy, make sure we reive the proper info.
+        request.Body(_textBodies.Element());
     }
 
     void DIALServer::StartApplication(const Web::Request& request, Core::ProxyType<Web::Response>& response, AppInformation& app)
     {
-        string parameters;
-        string additioanlDataUrl =  "http://localhost/" + app.Name() + "/" + _DefaultDataExtension;
-        TCHAR* encodedDataUrl = static_cast<TCHAR*>(ALLOCA(additioanlDataUrl.length() * 3 * sizeof(TCHAR)));
-        Core::URL::Encode(additioanlDataUrl.c_str(), static_cast<uint16_t>(additioanlDataUrl.length()), encodedDataUrl, static_cast<uint16_t>(additioanlDataUrl.length() * 3 * sizeof(TCHAR)));
-        if (request.HasBody() == true) {
-            parameters = *request.Body<const Web::TextBody>();
-            parameters = app.AppURL() + "?" + parameters;
-            parameters += "&additionalDataUrl=";
-        } else {
-          parameters = app.AppURL() + "?additionalDataUrl=";
-        }
-        parameters += encodedDataUrl;
+        const string payload = ((request.HasBody() == true)? string(*request.Body<const Web::TextBody>()) : "");
 
-        if (parameters.length() > MaxDialQuerySize) {
+        if (payload.length() > MaxDialQuerySize) {
             response->ErrorCode = Web::STATUS_REQUEST_ENTITY_TOO_LARGE;
-            response->Message = _T("Request entity is too big to fit the URL");
+            response->Message = _T("Payload too long");
         } else {
-            TRACE(Trace::Information, (_T("Launch Application [%s] with params: %s"), app.Name().c_str(), parameters.c_str()));
+            string additionalDataUrl;
+            app.Application()->AdditionalDataURL(additionalDataUrl);
+            TRACE(Trace::Information, (_T("Additional data URL for %s: '%s'"), app.Name().c_str(), additionalDataUrl.c_str()));
+
+            const uint16_t maxEncodedSize = static_cast<uint16_t>(additionalDataUrl.length() * 3 * sizeof(TCHAR));
+            TCHAR* encodedDataUrl = reinterpret_cast<TCHAR*>(ALLOCA(maxEncodedSize));
+            Core::URL::Encode(additionalDataUrl.c_str(), static_cast<uint16_t>(additionalDataUrl.length()), encodedDataUrl, maxEncodedSize);
+
+            const string parameters = (app.AppURL() + (app.HasQueryParameter() ? _T("&") : _T("?")) + _T("additionalDataUrl=") + encodedDataUrl);
+
+            TRACE(Trace::Information, (_T("Launch Application [%s] with params: '%s', payload: '%s'"), app.Name().c_str(), parameters.c_str(), payload.c_str()));
 
             // See if we can find the plugin..
             ASSERT(_service != NULL);
@@ -420,7 +415,7 @@ namespace Plugin {
                     response->ErrorCode = Web::STATUS_FORBIDDEN;
                     response->Message = _T("Forbidden");
                 } else {
-                    uint32_t result = app.Start(parameters);
+                    uint32_t result = app.Start(parameters, payload);
                     if (result != Core::ERROR_NONE && result != Core::ERROR_INPROGRESS) {
                         response->ErrorCode = Web::STATUS_SERVICE_UNAVAILABLE;
                         response->Message = _T("Service Unavailable");
@@ -433,42 +428,31 @@ namespace Plugin {
             } else {
                 // Make sure that there is connection between DIAL handler and application
                 if (app.IsConnected() == false && app.Connect() == false) {
-                    
-                    TRACE_L1("Cannot connect DIAL handler to application %s", app.Name().c_str());
-                } else if (app.HasHideAndShow() == true && app.IsHidden() == true) {
-                    uint32_t result = app.Show();
 
-                    // system app has special error codes. Handle them here.
-                    if (app.Name() == _SystemApp) {
-                        if (result == Core::ERROR_NONE) {
-                            response->ErrorCode = Web::STATUS_OK;
-                            response->Message = _T("OK");
-                        } else if (result == Core::ERROR_UNKNOWN_KEY) {
-                            response->ErrorCode = Web::STATUS_FORBIDDEN;
-                            response->Message = _T("Forbidden");
-                        } else {
-                            response->ErrorCode = Web::STATUS_INTERNAL_SERVER_ERROR;
-                            response->Message = _T("Internal error");
-                        }
-                    } else {
-                      if (result == Core::ERROR_NONE) {
-                          app.URL(parameters);
+                    TRACE(Trace::Information, (_T("Cannot connect DIAL handler to application %s"), app.Name().c_str()));
+                } else if (app.HasHide() == true && app.IsHidden() == true) {
+                    uint32_t result = (DeprecatedAPI() == true) ? app.Show() : app.Start(parameters, payload);
 
-                          response->Location = _dialServiceImpl->URL() + '/' + app.Name() + '/' + _DefaultControlExtension;
-                          response->ErrorCode = Web::STATUS_CREATED;
-                          response->Message = _T("Created");
-                      } else {
-                          response->ErrorCode = Web::STATUS_SERVICE_UNAVAILABLE;
-                          response->Message = _T("Service Unavailable");
-                      }
+                    if (result == Core::ERROR_NONE) {
+                        response->Location = _dialServiceImpl->URL() + '/' + app.Name() + '/' + _DefaultControlExtension;
+                        response->ErrorCode = Web::STATUS_OK;
+                        response->Message = _T("Created");
+                    }
+                    else {
+                        response->ErrorCode = Web::STATUS_SERVICE_UNAVAILABLE;
+                        response->Message = _T("Service Unavailable");
                     }
                 } else {
                     if (request.HasBody() == true) {
-                        app.URL(parameters);
-
-                        response->Location = _dialServiceImpl->URL() + '/' + app.Name() + '/' + _DefaultControlExtension;
-                        response->ErrorCode = Web::STATUS_CREATED;
-                        response->Message = _T("Created");
+                        if (app.URL(parameters, payload) == true) {
+                            response->Location = _dialServiceImpl->URL() + '/' + app.Name() + '/' + _DefaultControlExtension;
+                            response->ErrorCode = Web::STATUS_OK;
+                            response->Message = _T("Created");
+                        }
+                        else {
+                            response->ErrorCode = Web::STATUS_NOT_IMPLEMENTED;
+                            response->Message = _T("Can not change the URL runtime");
+                        }
                     } else {
                         response->ErrorCode = Web::STATUS_OK;
                         response->Message = _T("OK");
@@ -490,15 +474,15 @@ namespace Plugin {
             } else {
                 response->ErrorCode = Web::STATUS_OK;
                 response->Message = _T("OK");
-                app.Stop(_T(""));
+                app.Stop(_T(""), _T(""));
             }
         }
     }
 
-    // <GET> ../
     /* virtual */ Core::ProxyType<Web::Response> DIALServer::Process(const Web::Request& request)
     {
         ASSERT(_skipURL <= request.Path.length());
+
         // <GET> ../
         Core::ProxyType<Web::Response> result(PluginHost::IFactories::Instance().Response());
         Core::TextSegmentIterator index(Core::TextFragment(request.Path, _skipURL, static_cast<uint16_t>(request.Path.length()) - _skipURL), false, '/');
@@ -506,7 +490,7 @@ namespace Plugin {
         // By default, we are in front of any element, jump onto the first element, which is if, there is something an empty slot.
         index.Next();
 
-        result->ErrorCode = Web::STATUS_NOT_IMPLEMENTED;
+        result->ErrorCode = Web::STATUS_NOT_FOUND;
         result->Message = string(_T("Unknown request path specified."));
 
         TRACE(Protocol, (&request));
@@ -526,7 +510,7 @@ namespace Plugin {
                     result->ErrorCode = Web::STATUS_OK;
                     result->Message = _T("OK");
                     result->Body(_deviceInfo);
-                    result->ContentType = Web::MIME_XML;
+                    result->ContentType = Web::MIME_TEXT_XML;
 
                     Core::URL newURL;
                     _dialServiceImpl->URL(newURL);
@@ -540,31 +524,34 @@ namespace Plugin {
                 if (selectedApp == _appInfo.end()) {
                     result->ErrorCode = Web::STATUS_NOT_FOUND;
                     result->Message = _T("Requested App Description file [") + keyword + _T("] not found.");
-                } else if (index.Next() == false) {
+                }
+                else if (SafeOrigin(request, selectedApp->second) == false) {
+                    result->ErrorCode = Web::STATUS_FORBIDDEN;
+                    result->Message = string(_T("Origin of the request is incorrect."));
+                }
+                else if (index.Next() == false) {
 
-                    Version version;
-                    std::array<char, kMaxQueryValueLength> clientVersion {0};
+                    string versionText;
                     Core::URL::KeyValue options(request.Query.Value());
-                    if (options.Exists(kVersionSupportedByClientQueryKey.c_str(), true) == true) {
-                        const string versionStr (options[kVersionSupportedByClientQueryKey.c_str()].Text());
-                        Core::URL::Decode(versionStr.c_str(), static_cast<uint16_t>(versionStr.length()), clientVersion.data(), static_cast<uint16_t>(clientVersion.size()));
+                    if (options.Exists(_VersionSupportedKey, true) == true) {
+                        TCHAR destination[256];
+                        versionText = options[_VersionSupportedKey].Text();
+                        uint16_t length = Core::URL::Decode(versionText.c_str(), static_cast<uint16_t>(versionText.length()), destination, sizeof(destination));
 
-                        DIALServer::ParseVersion(versionStr, &version);
+                        versionText = string(destination, length);
                     }
 
-                    if (options.Exists(kClientFriendyNameQueryKey.c_str(), true) == true) {
-                        if (version.IsValid() == false || (version.IsDefault() == true &&
-                                                           version < Version{2, 1, 0})) {
+                    Version version(versionText);
+
+                    if (options.Exists(_ClientFriendlyName.c_str(), true) == true) {
+                        if ((version.IsValid() == false) || (version < Version(2, 1, 0))) {
                             // No version was specified but firendlyName was and this
                             // may only be sent to Server 2.1+
-                            version.Major = 2;
-                            version.Minor = 1;
-                            version.Patch = 0;
+                            version = Version(2, 1, 0);
                         }
                     }
-
-                    if (version.IsValid() == false) {
-                        version.SetDefault();
+                    else if (version.IsValid() == false) {
+                        version.Default();
                     }
 
                     // Get / Set AppInformation
@@ -575,13 +562,16 @@ namespace Plugin {
                         Core::ProxyType<Web::TextBody> info(_textBodies.Element());
                         result->ErrorCode = Web::STATUS_OK;
                         result->Message = _T("OK");
-                        result->ContentType = Web::MIME_XML;
+                        result->ContentType = Web::MIME_TEXT_XML;
                         Core::ProxyType<Web::TextBody> textBody(_textBodies.Element());
                         selectedApp->second.GetData(*textBody, version);
                         result->Body(textBody);
                         TRACE(Protocol, (static_cast<const string&>(*textBody)));
                     } else if (request.Verb == Web::Request::HTTP_POST) {
                         StartApplication(request, result, selectedApp->second);
+                    }
+                    else if (request.Verb == Web::Request::HTTP_DELETE) {
+                        StopApplication(request, result, selectedApp->second);
                     }
                 } else if (index.Current() == _DefaultDataUrlExtension) {
                     if (request.Verb == Web::Request::HTTP_GET) {
@@ -596,24 +586,35 @@ namespace Plugin {
                     if (request.Verb == Web::Request::HTTP_DELETE) {
                         StopApplication(request, result, selectedApp->second);
                     } else if (request.Verb == Web::Request::HTTP_POST) {
-                      if (index.Next() == true && index.Current() == kHideCommand) {
-                          if (selectedApp->second.HasHideAndShow() == true) {
-                              result->ErrorCode = Web::STATUS_OK;
-                              result->Message = _T("OK");
-                              selectedApp->second.Hide();
-                          } else {
-                              result->ErrorCode = Web::STATUS_NOT_IMPLEMENTED;
-                              result->Message = _T("Not Implemented");
-                          }
-                      } else {
-                          StartApplication(request, result, selectedApp->second);
-                      }
+                        if (index.Next() == true && index.Current() == _HideCommand) {
+                            if (selectedApp->second.IsRunning() == true) {
+                                if (selectedApp->second.HasHide() == true) {
+                                    result->ErrorCode = Web::STATUS_OK;
+                                    result->Message = _T("OK");
+                                    selectedApp->second.Hide();
+                                } else {
+                                    result->ErrorCode = Web::STATUS_NOT_IMPLEMENTED;
+                                    result->Message = _T("Not Implemented");
+                                }
+                            } else {
+                                result->ErrorCode = Web::STATUS_NOT_FOUND;
+                                result->Message = _T("App not running");
+                            }
+                        } else {
+                            StartApplication(request, result, selectedApp->second);
+                        }
                     }
                 } else if (index.Current() == _DefaultRunningExtension) {
-                    if ((request.Verb == Web::Request::HTTP_POST) || (request.Verb != Web::Request::HTTP_DELETE)) {
+                    if ((request.Verb == Web::Request::HTTP_POST) || (request.Verb == Web::Request::HTTP_DELETE)) {
                         result->ErrorCode = Web::STATUS_OK;
                         result->Message = _T("OK");
                         selectedApp->second.Running(request.Verb == Web::Request::HTTP_POST);
+                    }
+                } else if (index.Current() == ((DeprecatedAPI() == true) ? _T("Hidding") : _DefaultHiddenExtension)) {
+                    if ((request.Verb == Web::Request::HTTP_POST) || (request.Verb == Web::Request::HTTP_DELETE)) {
+                        result->ErrorCode = Web::STATUS_OK;
+                        result->Message = _T("OK");
+                        selectedApp->second.Hidden(request.Verb == Web::Request::HTTP_POST);
                     }
                 } else if (index.Current() == _DefaultDataExtension) {
                     result->ErrorCode = Web::STATUS_OK;
@@ -631,11 +632,28 @@ namespace Plugin {
             }
         }
 
-        if (request.Origin.IsSet() == true)
+        if (request.Origin.IsSet() == true) {
             result->AccessControlOrigin = request.Origin.Value();
+        }
 
         TRACE(Protocol, (&(*result)));
         return (result);
+    }
+
+    bool DIALServer::SafeOrigin(const Web::Request& request, const AppInformation& app) const {
+        bool safe = true;
+
+        if ((request.Origin.IsSet() == true) && (app.Origin().empty() == false)) {
+            Core::OptionalType<string> hostPortion (Core::URL(request.Origin.Value().c_str()).Host());
+
+            if (hostPortion.IsSet() == true) {
+                Core::NodeId source(hostPortion.Value().c_str());
+
+                safe = (source.IsLocalInterface() == true) || (hostPortion.Value().find(app.Origin()) != string::npos);
+            }
+        }
+
+        return (safe);
     }
 
     void DIALServer::Activated(Exchange::IWebServer* pluginInterface)
@@ -646,6 +664,9 @@ namespace Plugin {
 
         // Let's set the URL of the WebServer, as it is active :-)
         _dialServiceImpl->Locator(pluginInterface->Accessor() + _dialPath);
+
+        Core::URL url = Core::URL(pluginInterface->Accessor());
+        _webServerPort = url.Port().IsSet() ? url.Port().Value() : 80;
 
         // Redirect all calls to the DIALServer, via a proxy.
         pluginInterface->AddProxy(_dialPath, _dialPath, remote);
@@ -693,6 +714,22 @@ namespace Plugin {
         }
 
         _adminLock.Unlock();
+    }
+
+    Exchange::IDIALServer::IApplication* DIALServer::Application(const string& name)
+    {
+        Exchange::IDIALServer::IApplication* application = nullptr;
+
+        auto app(_appInfo.find(name));
+        if (app != _appInfo.end()) {
+            application = app->second.Application();
+            application->AddRef();
+        } else {
+            TRACE(Trace::Error, (_T("Application %s not available"), name.c_str()));
+        }
+
+        return (application);
+
     }
 }
 }

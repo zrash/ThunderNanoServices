@@ -21,12 +21,12 @@ SystemCommands plugin for Thunder framework.
 <a name="head.Scope"></a>
 ## Scope
 
-This document describes purpose and functionality of the SystemCommands plugin. It includes detailed specification of its configuration and methods provided.
+This document describes purpose and functionality of the SystemCommands plugin. It includes detailed specification about its configuration and methods provided.
 
 <a name="head.Case_Sensitivity"></a>
 ## Case Sensitivity
 
-All identifiers on the interface described in this document are case-sensitive. Thus, unless stated otherwise, all keywords, entities, properties, relations and actions should be treated as such.
+All identifiers of the interfaces described in this document are case-sensitive. Thus, unless stated otherwise, all keywords, entities, properties, relations and actions should be treated as such.
 
 <a name="head.Acronyms,_Abbreviations_and_Terms"></a>
 ## Acronyms, Abbreviations and Terms
@@ -73,7 +73,7 @@ The table below lists configuration options of the plugin.
 | callsign | string | Plugin instance name (default: *SystemCommands*) |
 | classname | string | Class name: *SystemCommands* |
 | locator | string | Library name: *libWPEFrameworkSystemCommands.so* |
-| autostart | boolean | Determines if the plugin is to be started automatically along with the framework |
+| autostart | boolean | Determines if the plugin shall be started automatically along with the framework |
 
 <a name="head.Methods"></a>
 # Methods
@@ -85,6 +85,7 @@ SystemCommands interface methods:
 | Method | Description |
 | :-------- | :-------- |
 | [usbreset](#method.usbreset) | Resets a USB device |
+
 
 <a name="method.usbreset"></a>
 ## *usbreset <sup>method</sup>*
@@ -129,6 +130,7 @@ With this method a USB device can be reset using USBFS_RESET ioctl command.
     }
 }
 ```
+
 #### Response
 
 ```json
@@ -138,3 +140,4 @@ With this method a USB device can be reset using USBFS_RESET ioctl command.
     "result": null
 }
 ```
+

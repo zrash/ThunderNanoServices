@@ -35,9 +35,9 @@
         uint32_t endpoint_disconnect(const JsonData::WifiControl::DeleteParamsInfo& params);
         uint32_t get_status(JsonData::WifiControl::StatusData& response) const;
         uint32_t get_networks(Core::JSON::ArrayType<JsonData::WifiControl::NetworkInfo>& response) const;
-        uint32_t get_config(const string& index, JsonData::WifiControl::ConfigData& response) const;
-        uint32_t set_config(const string& index, const JsonData::WifiControl::ConfigData& param);
-        uint32_t get_debug(Core::JSON::DecUInt32& response) const;
+        uint32_t get_configs(Core::JSON::ArrayType<JsonData::WifiControl::ConfigInfo>& response) const;
+        uint32_t get_config(const string& index, JsonData::WifiControl::ConfigInfo& response) const;
+        uint32_t set_config(const string& index, const JsonData::WifiControl::ConfigInfo& param);
         uint32_t set_debug(const Core::JSON::DecUInt32& param);
         void event_scanresults(const Core::JSON::ArrayType<JsonData::WifiControl::NetworkInfo>& list);
         void event_networkchange();
@@ -94,27 +94,16 @@ namespace Plugin {
         return Core::ERROR_NONE;
     }
 
-    // Method: store - Stores configurations in the permanent storage
+    // Method: store - Stores the configurations in persistent storage
     // Return codes:
     //  - ERROR_NONE: Success
     //  - ERROR_WRITE_ERROR: Returned when the operation failed
     uint32_t WifiControl::endpoint_store()
     {
-        uint32_t result = Core::ERROR_WRITE_ERROR;
-        Core::File configFile(_configurationStore);
-
-        if (configFile.Create() == true) {
-            WifiControl::ConfigList configs;
-            WPASupplicant::Config::Iterator list(_controller->Configs());
-            configs.Set(list);
-            if (configs.IElement::ToFile(configFile) == true)
-                result = Core::ERROR_NONE;
-        }
-
-        return result;
+        return Store();
     }
 
-    // Method: scan - Searches for an available networks
+    // Method: scan - Searches for available networks
     // Return codes:
     //  - ERROR_NONE: Success
     //  - ERROR_INPROGRESS: Returned when scan is already in progress
@@ -124,23 +113,22 @@ namespace Plugin {
         return _controller->Scan();
     }
 
-    // Method: connect - Attempt connection to the specified network
+    // Method: connect - Attempts connection to a network
     // Return codes:
     //  - ERROR_NONE: Success
-    //  - ERROR_UNKNOWN_KEY: Returned when the network with a the given SSID doesn't exists
+    //  - ERROR_UNKNOWN_KEY: Returned when the network with a the given SSID or security type doesn't exists
+    //  - ERROR_UNAVAILABLE: Returned when connection fails if there is no associated bssid to connect and not defined as AccessPoint. Rescan and try to connect"
+    //  - ERROR_INVALID_SIGNATURE: Returned when connection is attempted with wrong password
+    //  - ERROR_ALREADY_CONNECTED: Returned when there is already a connection
     //  - ERROR_ASYNC_ABORTED: Returned when connection attempt fails for other reasons
     uint32_t WifiControl::endpoint_connect(const DeleteParamsInfo& params)
     {
         const string& ssid = params.Ssid.Value();
 
-        if (_autoConnect == true) {
             return Connect(ssid);
-        } else {
-            return _controller->Connect(ssid);
-        }
     }
 
-    // Method: disconnect - Disconnects from the specified network
+    // Method: disconnect - Disconnects from a network
     // Return codes:
     //  - ERROR_NONE: Success
     //  - ERROR_UNKNOWN_KEY: Returned when the network with a the given SSID doesn't exists
@@ -149,14 +137,10 @@ namespace Plugin {
     {
         const string& ssid = params.Ssid.Value();
 
-        if (_autoConnect == true) {
             return Disconnect(ssid);
-        } else {
-            return _controller->Disconnect(ssid);
-        }
     }
 
-    // Property: status - Returns the current status information
+    // Property: status - Network status
     // Return codes:
     //  - ERROR_NONE: Success
     uint32_t WifiControl::get_status(StatusData& response) const
@@ -167,7 +151,7 @@ namespace Plugin {
         return Core::ERROR_NONE;
     }
 
-    // Property: networks - Returns information about available networks
+    // Property: networks - Available networks
     // Return codes:
     //  - ERROR_NONE: Success
     uint32_t WifiControl::get_networks(Core::JSON::ArrayType<NetworkInfo>& response) const
@@ -182,11 +166,27 @@ namespace Plugin {
         return Core::ERROR_NONE;
     }
 
-    // Property: config - Returns information about configuration of the specified network(s) (FIXME!!!)
+    // Property: configs - All WiFi configurations
     // Return codes:
     //  - ERROR_NONE: Success
-    //  - ERROR_UNKNOWN_KEY: Config does not exist
-    //  - ERROR_INCOMPLETE_CONFIG: Passed in config is invalid
+    //  - ERROR_UNKNOWN_KEY: Configuration does not exist
+    uint32_t WifiControl::get_configs(Core::JSON::ArrayType<ConfigInfo>& response) const
+    {
+        WPASupplicant::Config::Iterator list(_controller->Configs());
+        while (list.Next() == true) {
+            ConfigInfo conf;
+            WifiControl::FillConfig(list.Current(), conf);
+            response.Add(conf);
+        }
+
+        return Core::ERROR_NONE;
+    }
+
+    // Property: config - Single WiFi configuration
+    // Return codes:
+    //  - ERROR_NONE: Success
+    //  - ERROR_UNKNOWN_KEY: Configuration does not exist
+    //  - ERROR_INCOMPLETE_CONFIG: Passed in configuration is invalid
     uint32_t WifiControl::get_config(const string& ssid, ConfigInfo& response) const
     {
         uint32_t result = Core::ERROR_UNKNOWN_KEY;
@@ -201,27 +201,13 @@ namespace Plugin {
         return result;
     }
 
-    // Property: configs - Network configuration (FIXME!!!)
+
+
+    // Property: config - Single WiFi configuration
     // Return codes:
     //  - ERROR_NONE: Success
-    //  - ERROR_UNKNOWN_KEY: Config does not exist
-    uint32_t WifiControl::get_configs(Core::JSON::ArrayType<ConfigInfo>& response) const
-    {
-        WPASupplicant::Config::Iterator list(_controller->Configs());
-        while (list.Next() == true) {
-            ConfigInfo conf;
-            WifiControl::FillConfig(list.Current(), conf);
-            response.Add(conf);
-        }
-
-        return Core::ERROR_NONE;
-    }
-
-    // Property: config - Returns information about configuration of the specified network(s) (FIXME!!!)
-    // Return codes:
-    //  - ERROR_NONE: Success
-    //  - ERROR_UNKNOWN_KEY: Config does not exist
-    //  - ERROR_INCOMPLETE_CONFIG: Passed in config is invalid
+    //  - ERROR_UNKNOWN_KEY: Configuration does not exist
+    //  - ERROR_INCOMPLETE_CONFIG: Passed in configuration is invalid
     uint32_t WifiControl::set_config(const string& ssid, const ConfigInfo& param)
     {
         uint32_t result = Core::ERROR_NONE;
@@ -230,12 +216,15 @@ namespace Plugin {
             result = Core::ERROR_UNKNOWN_KEY;
         } else {
             WPASupplicant::Config profile(_controller->Create(ssid));
-            UpdateConfig(profile, param);
+            if (UpdateConfig(profile, param) != true) {
+                result = Core::ERROR_INCOMPLETE_CONFIG;
+                _controller->Destroy(ssid);
+            }
         }
         return result;
     }
 
-    // Property: debug - Sets specified debug level
+    // Property: debug - Sets debug level
     // Return codes:
     //  - ERROR_NONE: Success
     //  - ERROR_UNAVAILABLE: Returned when the operation is unavailable
@@ -250,19 +239,19 @@ namespace Plugin {
         return result;
     }
 
-    // Event: scanresults - Signals that the scan operation has finished and carries results of it
+    // Event: scanresults - Signals that the scan operation has finished
     void WifiControl::event_scanresults(const Core::JSON::ArrayType<JsonData::WifiControl::NetworkInfo>& list)
     {
         Notify(_T("scanresults"), list);
     }
 
-    // Event: networkchange - Informs that something has changed with the network e
+    // Event: networkchange - Signals that a network property has changed
     void WifiControl::event_networkchange()
     {
         Notify(_T("networkchange"));
     }
 
-    // Event: connectionchange - Notifies about connection state change i
+    // Event: connectionchange - Notifies about connection state change
     void WifiControl::event_connectionchange(const string& ssid)
     {
         Core::JSON::String params;

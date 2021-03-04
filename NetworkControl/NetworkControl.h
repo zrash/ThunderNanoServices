@@ -20,8 +20,8 @@
 #ifndef PLUGIN_NETWORKCONTROL_H
 #define PLUGIN_NETWORKCONTROL_H
 
-#include "DHCPClientImplementation.h"
 #include "Module.h"
+#include "DHCPClient.h"
 
 #include <interfaces/IIPNetwork.h>
 #include <interfaces/json/JsonData_NetworkControl.h> 
@@ -29,58 +29,94 @@
 namespace WPEFramework {
 namespace Plugin {
 
-    class NetworkControl : public Exchange::IIPNetwork,
-                           public PluginHost::IPlugin,
+    class NetworkControl : public PluginHost::IPlugin,
                            public PluginHost::IWeb,
                            public PluginHost::JSONRPC {
     public:
         class Entry : public Core::JSON::Container {
-        private:
+        public:
             Entry& operator=(const Entry&) = delete;
 
-        public:
             Entry()
                 : Core::JSON::Container()
                 , Interface()
+                , Source()
                 , Mode(JsonData::NetworkControl::NetworkData::ModeType::MANUAL)
                 , Address()
                 , Mask(32)
                 , Gateway()
+                , LeaseTime(0)
+                , RenewalTime(0)
+                , RebindingTime(0)
+                , Xid(0)
+                , DNS()
+                , TimeOut(10)
+                , Retries(3)
                 , _broadcast()
             {
                 Add(_T("interface"), &Interface);
+                Add(_T("source"), &Source);
                 Add(_T("mode"), &Mode);
                 Add(_T("address"), &Address);
                 Add(_T("mask"), &Mask);
                 Add(_T("gateway"), &Gateway);
                 Add(_T("broadcast"), &_broadcast);
+                Add(_T("leaseTime"), &LeaseTime);
+                Add(_T("renewalTime"), &RenewalTime);
+                Add(_T("rebindingTime"), &RebindingTime);
+                Add(_T("xid"), &Xid);
+                Add(_T("dns"), &DNS);
+                Add(_T("timeout"), &TimeOut);
+                Add(_T("retries"), &Retries);
             }
             Entry(const Entry& copy)
                 : Core::JSON::Container()
                 , Interface(copy.Interface)
+                , Source(copy.Source)
                 , Mode(copy.Mode)
                 , Address(copy.Address)
                 , Mask(copy.Mask)
                 , Gateway(copy.Gateway)
+                , LeaseTime(copy.LeaseTime)
+                , RenewalTime(copy.RenewalTime)
+                , RebindingTime(copy.RebindingTime)
+                , Xid(copy.Xid)
+                , DNS(copy.DNS)
+                , TimeOut(copy.TimeOut)
+                , Retries(copy.Retries)
                 , _broadcast(copy._broadcast)
             {
                 Add(_T("interface"), &Interface);
+                Add(_T("source"), &Source);
                 Add(_T("mode"), &Mode);
                 Add(_T("address"), &Address);
                 Add(_T("mask"), &Mask);
                 Add(_T("gateway"), &Gateway);
                 Add(_T("broadcast"), &_broadcast);
+                Add(_T("leaseTime"), &LeaseTime);
+                Add(_T("renewalTime"), &RenewalTime);
+                Add(_T("rebindingTime"), &RebindingTime);
+                Add(_T("xid"), &Xid);
+                Add(_T("dns"), &DNS);
+                Add(_T("timeout"), &TimeOut);
+                Add(_T("retries"), &Retries);
             }
-            virtual ~Entry()
-            {
-            }
+            ~Entry() override = default;
 
         public:
             Core::JSON::String Interface;
+            Core::JSON::String Source;
             Core::JSON::EnumType<JsonData::NetworkControl::NetworkData::ModeType> Mode;
             Core::JSON::String Address;
             Core::JSON::DecUInt8 Mask;
             Core::JSON::String Gateway;
+            Core::JSON::DecUInt32 LeaseTime;
+            Core::JSON::DecUInt32 RenewalTime;
+            Core::JSON::DecUInt32 RebindingTime;
+            Core::JSON::DecUInt32 Xid;
+            Core::JSON::ArrayType<Core::JSON::String> DNS;
+            Core::JSON::DecUInt8 TimeOut;
+            Core::JSON::DecUInt8 Retries;
 
         public:
             void Broadcast(const Core::NodeId& address)
@@ -109,158 +145,40 @@ namespace Plugin {
         };
 
     private:
-        class AdapterObserver : public Core::IDispatch,
-                                public WPEFramework::Core::AdapterObserver::INotification {
-        private:
-            AdapterObserver() = delete;
-            AdapterObserver(const AdapterObserver&) = delete;
-            AdapterObserver& operator=(const AdapterObserver&) = delete;
+        using Store = Core::JSON::ArrayType<Entry>;
 
+        class Settings {
         public:
-#ifdef __WINDOWS__
-#pragma warning(disable : 4355)
-#endif
-            AdapterObserver(NetworkControl* parent)
-                : _parent(*parent)
-                , _adminLock()
-                , _observer(this)
-                , _reporting()
-            {
-                ASSERT(parent != nullptr);
-            }
-#ifdef __WINDOWS__
-#pragma warning(default : 4355)
-#endif
-            virtual ~AdapterObserver()
-            {
-            }
+            Settings& operator= (const Settings& rhs) = delete;
 
-        public:
-            void Open()
-            {
-                _observer.Open();
-            }
-            void Close()
-            {
-                Core::ProxyType<Core::IDispatch> job(*this);
-                _observer.Close();
-
-                _adminLock.Lock();
-
-                Core::IWorkerPool::Instance().Revoke(job);
-
-                _reporting.clear();
-
-                _adminLock.Unlock();
-            }
-            virtual void Event(const string& interface) override
-            {
-
-                _adminLock.Lock();
-
-                if (std::find(_reporting.begin(), _reporting.end(), interface) == _reporting.end()) {
-                    // We need to add this interface, it is currently not present.
-                    _reporting.push_back(interface);
-
-                    // If this is the first entry, we need to submit a job for processing
-                    if (_reporting.size() == 1) {
-                        // These events tend to "dender" a lot. Give it some time
-                        Core::Time entry(Core::Time::Now().Add(100));
-                        Core::ProxyType<Core::IDispatch> job(*this);
-
-                        Core::IWorkerPool::Instance().Schedule(entry, job);
-                    }
-                }
-
-                _adminLock.Unlock();
-            }
-            virtual void Dispatch() override
-            {
-                // Yippie a yee, we have an interface notification:
-                _adminLock.Lock();
-                while (_reporting.size() != 0) {
-                    const string interfaceName(_reporting.front());
-                    _reporting.pop_front();
-                    _adminLock.Unlock();
-
-                    _parent.Activity(interfaceName);
-
-                    _adminLock.Lock();
-                }
-                _adminLock.Unlock();
-            }
-
-        private:
-            NetworkControl& _parent;
-            Core::CriticalSection _adminLock;
-            Core::AdapterObserver _observer;
-            std::list<string> _reporting;
-        };
-
-        class Config : public Core::JSON::Container {
-        private:
-            Config(const Config&) = delete;
-            Config& operator=(const Config&) = delete;
-
-        public:
-            Config()
-                : Core::JSON::Container()
-                , DNSFile("/etc/resolv.conf")
-                , Interfaces()
-                , DNS()
-                , TimeOut(5)
-                , Retries(4)
-                , Open(true)
-            {
-                Add(_T("dnsfile"), &DNSFile);
-                Add(_T("interfaces"), &Interfaces);
-                Add(_T("timeout"), &TimeOut);
-                Add(_T("retries"), &Retries);
-                Add(_T("open"), &Open);
-                Add(_T("dns"), &DNS);
-            }
-            ~Config()
-            {
-            }
-
-        public:
-            Core::JSON::String DNSFile;
-            Core::JSON::ArrayType<Entry> Interfaces;
-            Core::JSON::ArrayType<Core::JSON::String> DNS;
-            Core::JSON::DecUInt8 TimeOut;
-            Core::JSON::DecUInt8 Retries;
-            Core::JSON::Boolean Open;
-        };
-
-        class StaticInfo {
-        private:
-            StaticInfo& operator=(const StaticInfo&) = delete;
-
-        public:
-            StaticInfo()
-                : _mode(JsonData::NetworkControl::NetworkData::ModeType::MANUAL)
+            Settings()
+                : _xid(0)
+                , _mode(JsonData::NetworkControl::NetworkData::ModeType::MANUAL)
                 , _address()
                 , _gateway()
                 , _broadcast()
+                , _dns()
             {
             }
-            StaticInfo(const Entry& info)
-                : _mode(info.Mode.Value())
+            Settings(const Entry& info)
+                : _xid(info.Xid.Value())
+                , _mode(info.Mode.Value())
                 , _address(Core::IPNode(Core::NodeId(info.Address.Value().c_str()), info.Mask.Value()))
                 , _gateway(Core::NodeId(info.Gateway.Value().c_str()))
                 , _broadcast(info.Broadcast())
+                , _dns()
             {
             }
-            StaticInfo(const StaticInfo& copy)
-                : _mode(copy._mode)
+            Settings(const Settings& copy)
+                : _xid(copy._xid)
+                , _mode(copy._mode)
                 , _address(copy._address)
                 , _gateway(copy._gateway)
                 , _broadcast(copy._broadcast)
+                , _dns()
             {
             }
-            ~StaticInfo()
-            {
-            }
+            ~Settings() = default;
 
         public:
             inline JsonData::NetworkControl::NetworkData::ModeType Mode() const
@@ -279,216 +197,430 @@ namespace Plugin {
             {
                 return (_broadcast);
             }
-            inline const DHCPClientImplementation::Offer& Offer() const
+            inline const uint32_t Xid() const
             {
-                return (_offer);
+                return (_xid);
             }
-            inline void Offer(const DHCPClientImplementation::Offer& offer)
-            {
-                _offer = offer;
+            bool Store(const Entry& info) {
+
+                bool updated = false;
+
+                if (_mode != info.Mode.Value()) {
+                    _mode = info.Mode.Value();
+                    updated = true;
+                }
+                Core::NodeId address(info.Address.Value().c_str());
+                if ((address.IsValid() == true) && ((_address != address) || (_address.Mask() != info.Mask.Value()))) {
+                    _address = Core::IPNode(address, info.Mask.Value());
+
+                    updated = true;
+                }
+                Core::NodeId gateway(info.Gateway.Value().c_str());
+                if ((gateway.IsValid() == true) && (_gateway != gateway)) {
+                    _gateway = gateway;
+                    updated = true;
+                }
+                if ((_broadcast.IsValid() == true) && (_broadcast != info.Broadcast())) {
+                    _broadcast = info.Broadcast();
+                    updated = true;
+
+                }
+                return updated;
             }
-            inline void Store(Entry& info)
-            {
-                info.Mode = _mode;
-                info.Address = _address.HostAddress();
-                info.Mask = _address.Mask();
-                info.Gateway = _gateway.HostAddress();
-                info.Broadcast(_broadcast);
+            bool Store(const DHCPClient::Offer& offer) {
+                bool updated  = false;
+                if (_xid != offer.Xid()) {
+                    _xid = offer.Xid();
+                }
+
+                if ( (_address != offer.Address()) || (_address.Mask() != offer.Netmask()) ) {
+                    updated = true;
+                    _address = Core::IPNode(offer.Address(), offer.Netmask());
+                }
+                if (_gateway != offer.Gateway()) {
+                    updated = true;
+                    _gateway = offer.Gateway();
+                }
+                if (_broadcast != offer.Broadcast()) {
+                    updated = true;
+                    _broadcast = offer.Broadcast();
+                }
+                if (_dns.size() == offer.DNS().size()) {
+                    for (auto& dns:offer.DNS()) {
+                        if (std::find(_dns.begin(), _dns.end(), dns) == _dns.end()) {
+                            updated = true;
+                            _dns = offer.DNS();
+                            break;
+                        }
+                    }
+                } else {
+                    updated = true;
+                    _dns = offer.DNS();
+                }
+
+                return(updated);
             }
+            void Clear() {
+                _address = Core::IPNode();
+                _gateway = Core::NodeId();
+                _broadcast = Core::NodeId();
+            } 
 
         private:
+            uint32_t _xid;
             JsonData::NetworkControl::NetworkData::ModeType _mode;
             Core::IPNode _address;
             Core::NodeId _gateway;
             Core::NodeId _broadcast;
-            DHCPClientImplementation::Offer _offer;
+            std::list<Core::NodeId> _dns;
         };
-        class DHCPEngine : public Core::IDispatch {
-        private:
-            DHCPEngine() = delete;
-            DHCPEngine(const DHCPEngine&) = delete;
-            DHCPEngine& operator=(const DHCPEngine&) = delete;
 
+        class AdapterObserver : public WPEFramework::Core::AdapterObserver::INotification {
         public:
+            AdapterObserver() = delete;
+            AdapterObserver(const AdapterObserver&) = delete;
+            AdapterObserver& operator=(const AdapterObserver&) = delete;
+
 #ifdef __WINDOWS__
 #pragma warning(disable : 4355)
 #endif
-            DHCPEngine(NetworkControl* parent, const string& interfaceName, const string& persistentStoragePath)
-                : _parent(*parent)
-                , _retries(0)
-                , _client(interfaceName, std::bind(&DHCPEngine::NewOffer, this, std::placeholders::_1), 
-                          std::bind(&DHCPEngine::RequestResult, this, std::placeholders::_1, std::placeholders::_2))
-                , _leaseFilePath((persistentStoragePath.empty()) ? "" :  (persistentStoragePath + _client.Interface() + ".json"))
+            AdapterObserver(NetworkControl& parent)
+                : _parent(parent)
+                , _adminLock()
+                , _observer(this)
+                , _reporting()
+                , _job(*this)
             {
-
             }
 #ifdef __WINDOWS__
 #pragma warning(default : 4355)
 #endif
-            ~DHCPEngine()
-            {
-            }
+            ~AdapterObserver() override = default;
+
         public:
-            // Permanent IP storage
-            void SaveLeases();
-            bool LoadLeases();
-
-            inline DHCPClientImplementation::classifications Classification() const
+            void Open()
             {
-                return (_client.Classification());
+                _observer.Open();
             }
-            inline uint32_t Discover()
+            void Close()
             {
-                return (Discover(Core::NodeId()));
-            }
+                _observer.Close();
 
-            inline uint32_t Discover(const Core::NodeId& preferred)
+                _adminLock.Lock();
+
+                _reporting.clear();
+
+                _adminLock.Unlock();
+
+                _job.Revoke();
+            }
+            virtual void Event(const string& interface) override
             {
-                ResetWatchdog();
-                uint32_t result = _client.Discover(preferred);
+                _adminLock.Lock();
 
-                return (result);
-            }
+                if (std::find(_reporting.begin(), _reporting.end(), interface) == _reporting.end()) {
+                    // We need to add this interface, it is currently not present.
+                    _reporting.push_back(interface);
 
-            void GetIP() 
-            {
-                return (GetIP(Core::NodeId()));
-            }
-
-            void GetIP(const Core::NodeId& preferred)
-            {
-
-                auto offerIterator = _client.UnleasedOffers();
-                if (offerIterator.Next() == true) {
-                    Request(offerIterator.Current());
-                } else {
-                    Discover(preferred);
-                }
-            }
-
-            void NewOffer(const DHCPClientImplementation::Offer& offer) {
-                if (_parent.NewOffer(_client.Interface(), offer) == true) {
-                    Request(offer);
-                }
-            }
-
-            void RequestResult(const DHCPClientImplementation::Offer& offer, const bool result) {
-                StopWatchdog();
-
-                JsonData::NetworkControl::ConnectionchangeParamsData::StatusType status;
-                if (result == true) {
-                    _parent.RequestAccepted(_client.Interface(), offer);
-                    status = JsonData::NetworkControl::ConnectionchangeParamsData::StatusType::CONNECTED;
-                } else {
-                    _parent.RequestFailed(_client.Interface(), offer);
-                    status = JsonData::NetworkControl::ConnectionchangeParamsData::StatusType::CONNECTIONFAILED;
+                    _job.Submit();
                 }
 
-                _parent.event_connectionchange(_client.Interface().c_str(), offer.Address().HostAddress().c_str(), status);
+                _adminLock.Unlock();
             }
-
-            inline void Request(const DHCPClientImplementation::Offer& offer) {
-
-                ResetWatchdog();
-                _client.Request(offer);
-            }
-
-            inline void Completed()
+            void Dispatch()
             {
-                _client.Completed();
-            }
-            inline DHCPClientImplementation::Iterator UnleasedOffers()
-            {
-                return (_client.UnleasedOffers());
-            }
-            inline void RemoveUnleasedOffer(const DHCPClientImplementation::Offer& offer) 
-            {
-                _client.RemoveUnleasedOffer(offer);
-            }
+                // Yippie a yee, we have an interface notification:
+                _adminLock.Lock();
 
-            void SetupWatchdog() 
-            {
-                const uint16_t responseMS = _parent.ResponseTime() * 1000;
-                Core::Time entry(Core::Time::Now().Add(responseMS));
-                _retries = _parent.Retries();
+                while (_reporting.size() != 0) {
+                    const string interfaceName(_reporting.front());
+                    _reporting.pop_front();
+                    _adminLock.Unlock();
 
-                Core::ProxyType<Core::IDispatch> job(*this);    
+                    _parent.Activity(interfaceName);
 
-                // Submit a job, as watchdog.
-                Core::IWorkerPool::Instance().Schedule(entry, job);
-            }
-
-            inline void StopWatchdog() 
-            {
-                Core::IWorkerPool::Instance().Revoke(Core::ProxyType<Core::IDispatch>(*this));
-            }
-
-            inline void ResetWatchdog() 
-            {
-                StopWatchdog();
-                SetupWatchdog();
-            }
-
-            void CleanUp() 
-            {
-                StopWatchdog();
-                _client.Completed();
-            }
-
-            virtual void Dispatch() override
-            {
-                if (_retries > 0) {
-                    const uint16_t responseMS = _parent.ResponseTime() * 1000;
-                    Core::Time entry(Core::Time::Now().Add(responseMS));
-                    Core::ProxyType<Core::IDispatch> job(*this);
-
-                    _retries--;
-                    _client.Resend();
-
-                    // Schedule next retry
-                    Core::IWorkerPool::Instance().Schedule(entry, job);
-                } else {
-                    if (_client.Classification() == DHCPClientImplementation::CLASSIFICATION_DISCOVER) {
-
-                        // No acceptable offer found
-                        _parent.NoOffers(_client.Interface());
-                    } else if (_client.Classification() == DHCPClientImplementation::CLASSIFICATION_REQUEST) {
-
-                        // Request left without repsonse
-                        DHCPClientImplementation::Iterator offer = _client.CurrentlyRequestedOffer();
-                        if (offer.IsValid()) {
-                            // Remove unresponsive offer from potential candidates
-                            DHCPClientImplementation::Offer copy = offer.Current(); 
-                            _client.RemoveUnleasedOffer(offer.Current());
-                            
-                            // Inform controller that request failed
-                            _parent.RequestFailed(_client.Interface(), copy);
-                        }
-                    }
+                    _adminLock.Lock();
                 }
+                _adminLock.Unlock();
             }
 
         private:
             NetworkControl& _parent;
-            uint8_t _retries;
-            DHCPClientImplementation _client;
-            string _leaseFilePath;
+            Core::CriticalSection _adminLock;
+            Core::AdapterObserver _observer;
+            std::list<string> _reporting;
+            Core::WorkerPool::JobType<AdapterObserver&> _job;
         };
 
-    private:
+        class Config : public Core::JSON::Container {
+        public:
+            Config(const Config&) = delete;
+            Config& operator=(const Config&) = delete;
+
+            Config()
+                : Core::JSON::Container()
+                , DNSFile("/etc/resolv.conf")
+                , Interfaces()
+                , DNS()
+                , TimeOut(5)
+                , Retries(4)
+                , Open(true)
+            {
+                Add(_T("dnsfile"), &DNSFile);
+                Add(_T("interfaces"), &Interfaces);
+                Add(_T("timeout"), &TimeOut);
+                Add(_T("retries"), &Retries);
+                Add(_T("open"), &Open);
+                Add(_T("dns"), &DNS);
+                Add(_T("required"), &Set);
+            }
+            ~Config() override = default;
+
+        public:
+            Core::JSON::String DNSFile;
+            Core::JSON::ArrayType<Entry> Interfaces;
+            Core::JSON::ArrayType<Core::JSON::String> DNS;
+            Core::JSON::ArrayType<Core::JSON::String> Set;
+            Core::JSON::DecUInt8 TimeOut;
+            Core::JSON::DecUInt8 Retries;
+            Core::JSON::Boolean Open;
+        };
+
+        class DHCPEngine : private DHCPClient::ICallback {
+        private:
+            static constexpr uint32_t AckWaitTimeout = 1000; // 1 second is a life time for a server to respond!
+
+        public:
+            DHCPEngine() = delete;
+            DHCPEngine(const DHCPEngine&) = delete;
+            DHCPEngine& operator=(const DHCPEngine&) = delete;
+
+#ifdef __WINDOWS__
+#pragma warning(disable : 4355)
+#endif
+             DHCPEngine(NetworkControl& parent, const string& interfaceName, const uint8_t waitTimeSeconds, const uint8_t maxRetries, const Entry& info)
+                : _parent(parent)
+                , _retries(0)
+                , _maxRetries(maxRetries)
+                , _handleTime(1000 * waitTimeSeconds)
+                , _client(interfaceName, this)
+                , _offers()
+                , _job(*this)
+                , _settings(info)
+            {
+                if ( (_settings.Address().IsValid() == true) && (info.Source.IsSet() == true) ) {
+                    // We can start with an Request, i.s.o. an ack...?
+                    Core::NodeId source(info.Source.Value().c_str());
+
+                    if (source.IsValid() == true) {
+                        // Extract the DNS that where associated with this DHCP..
+                        std::list<Core::NodeId> dns;
+                       
+                        Core::JSON::ArrayType<Core::JSON::String>::ConstIterator entries(info.DNS.Elements());
+
+                        while (entries.Next() == true) {
+                            Core::NodeId entry(entries.Current().Value().c_str());
+
+                            if (entry.IsValid() == true) {
+                                dns.push_back(entry);
+                            }
+                        }
+
+                        _offers.emplace_back(source, static_cast<const Core::NodeId&>(_settings.Address()), _settings.Address().Mask(), _settings.Gateway(), _settings.Broadcast(), _settings.Xid(), std::move(dns));
+                    }
+                }
+            }
+#ifdef __WINDOWS__
+#pragma warning(default : 4355)
+#endif
+           ~DHCPEngine() = default; 
+
+        public:
+            inline uint32_t Discover(const Core::NodeId& preferred)
+            {
+                uint32_t result;
+                _retries = 0;
+                _job.Revoke();
+                if ( (_offers.size() > 0) && (_offers.front().Address() == preferred) ) {
+                    _job.Schedule(Core::Time::Now().Add(AckWaitTimeout));
+                    result = _client.Request(_offers.front());
+                }
+                else {
+                    ClearLease();
+                    _job.Schedule(Core::Time::Now().Add(_handleTime));
+                    result = _client.Discover(preferred);
+                }
+
+                return (result);
+            }
+            inline void UpdateMAC(const uint8_t buffer[], const uint8_t size) 
+            {
+                _client.UpdateMAC(buffer, size);
+            }
+            void Dispatch()
+            {
+                Core::AdapterIterator hardware(_client.Interface());
+
+                if ((hardware.IsValid() == false) || (hardware.IsRunning() == false)) {
+                    // If the interface is nolonger available, no need to reschedule , just report Failed!
+                    _client.Close();
+                    _parent.Failed(_client.Interface());
+                }
+                else if (_client.HasActiveLease() == true) {
+                    // See if the lease time is over...
+                    if (_client.Expired() <= Core::Time::Now()) {
+                        if (_retries++ >= _maxRetries){
+                            // Tried extending the lease but we did not get a response. Rediscover
+                            _retries = 0;
+                            ClearLease();
+                            _client.Discover(Core::NodeId());
+                            _job.Schedule(Core::Time::Now().Add(_handleTime));
+                        }
+                        else {
+                            // Start refreshing the Lease..
+                            _client.Request(_client.Lease());
+                            _job.Schedule(Core::Time::Now().Add(AckWaitTimeout));
+                        }
+                    }
+                    else {
+                        TRACE(Trace::Information, ("Installing the lease, Rechecking in %d seconds from now", _client.Lease().LeaseTime()));
+
+                        // We are good to go report success!, if this is a different set..
+                        if (_settings.Store(_client.Lease()) == true) {
+                            _parent.Accepted(_client.Interface(), _client.Lease());
+                            _client.Close();
+                        }
+                        _retries = 0;
+                        _job.Schedule(_client.Expired());
+                    }
+                }
+                else if (_offers.size() == 0) {
+                    // Looks like the Discovers did not discover anything, should we retry ?
+                    if (_retries++ < _maxRetries) {
+                        ClearLease();
+                        _client.Discover(Core::NodeId());
+                        _job.Schedule(Core::Time::Now().Add(_handleTime));
+                    }
+                    else {
+                        _client.Close();
+                        _parent.Failed(_client.Interface());
+                    }
+                }
+                else if ( (_client.Lease() == _offers.front()) && (_retries++ < _maxRetries) ) {
+                    // Looks like the acknwledge did not get a reply, should we retry ?
+                    _client.Request(_client.Lease());
+                    _job.Schedule(Core::Time::Now().Add(AckWaitTimeout));
+                }
+                else {
+                    // Request retries expired or Request rejected
+                    if (_retries >= _maxRetries) {
+                        hardware.Delete(Core::IPNode(_offers.front().Address(), _offers.front().Netmask()));
+                        _offers.pop_front();
+                    }
+
+                    if (_offers.size() == 0) {
+                        // There is no valid offer, so request for new offer
+                        _retries = 0;
+                        _job.Schedule(Core::Time::Now().Add(_handleTime));
+                    }
+                    else {
+                        DHCPClient::Offer& node (_offers.front());
+                        hardware.Add(Core::IPNode(node.Address(), node.Netmask()));
+
+                        TRACE(Trace::Information, ("Requesting a lease, for [%s]", node.Address().HostAddress().c_str()));
+
+                        // Seems we have some offers pending and we are not Active yet, request an ACK
+                        _client.Request(node);
+                        _retries = 0;
+                        _job.Schedule(Core::Time::Now().Add(AckWaitTimeout));
+                    }
+                }
+            }
+            const Settings& Info() const {
+                return (_settings);
+            }
+            const std::list<Core::NodeId>& DNS() const {
+                return (_client.Lease().DNS());
+            }
+            bool HasActiveLease() const {
+                return (_client.HasActiveLease());
+            }
+            void Get(Entry& info) const
+            {
+                info.Mode = _settings.Mode();
+                info.Interface = _client.Interface();
+                if (_client.HasActiveLease() == true) {
+                    if (_settings.Address().IsValid() == true) {
+                        info.Address = _settings.Address().HostAddress();
+                        info.Mask = _settings.Address().Mask();
+                        if (_settings.Gateway().IsValid() == true) {
+                            info.Gateway = _settings.Gateway().HostAddress();
+                        }
+                        if (_settings.Broadcast().IsValid() == true) {
+                            info.Broadcast(_settings.Broadcast());
+                        }
+                    }
+                    DHCPClient::Offer offer(_client.Lease());
+                    info.Source = offer.Source().HostAddress();
+                    info.Xid = _settings.Xid();
+                    for (const Core::NodeId& value : offer.DNS()) {
+                        Core::JSON::String& entry = info.DNS.Add();
+                        entry = value.HostAddress();
+                    }
+                }
+            }
+            inline void ClearLease() {
+                _offers.clear();
+                _settings.Clear();
+            }
+
+        private:
+            // Offered, Approved and Rejected all run on the communication thread, so be carefull !!
+            void Offered(const DHCPClient::Offer& offer) override {
+                _adminLock.Lock();
+                bool reschedule = (_offers.size() == 0);
+                _offers.emplace_back(offer);
+                _adminLock.Unlock();
+
+                TRACE(Trace::Information, ("Received an Offer from: %s for %s", offer.Source().HostAddress().c_str(), offer.Address().HostAddress().c_str()));
+                if (reschedule == true) {
+                    _job.Reschedule(Core::Time::Now());
+                }
+            }
+            void Approved(const DHCPClient::Offer& offer) override {
+                TRACE(Trace::Information, ("Acknowledged an Offer from: %s for %s", offer.Source().HostAddress().c_str(), offer.Address().HostAddress().c_str()));
+                _job.Reschedule(Core::Time::Now());
+            }
+            void Rejected(const DHCPClient::Offer& offer) override {
+                _retries = _maxRetries;
+                TRACE(Trace::Information, ("Rejected an Offer from: %s for %s", offer.Source().HostAddress().c_str(), offer.Address().HostAddress().c_str()));
+                _job.Reschedule(Core::Time::Now());
+            }
+
+        private:
+            NetworkControl& _parent;
+            Core::CriticalSection _adminLock;
+            uint8_t _retries;
+            uint8_t _maxRetries;
+            uint32_t _handleTime;
+            DHCPClient _client;
+            std::list<DHCPClient::Offer> _offers;
+            Core::WorkerPool::JobType<DHCPEngine&> _job;
+            Settings _settings;
+        };
+
+    public:
         NetworkControl(const NetworkControl&) = delete;
         NetworkControl& operator=(const NetworkControl&) = delete;
 
-    public:
         NetworkControl();
-        virtual ~NetworkControl();
+        ~NetworkControl() override;
 
         // Build QueryInterface implementation, specifying all possible interfaces to be returned.
         BEGIN_INTERFACE_MAP(NetworkControl)
-        INTERFACE_ENTRY(PluginHost::IPlugin)
-        INTERFACE_ENTRY(PluginHost::IWeb)
-        INTERFACE_ENTRY(Exchange::IIPNetwork)
-        INTERFACE_ENTRY(PluginHost::IDispatcher)
+            INTERFACE_ENTRY(PluginHost::IPlugin)
+            INTERFACE_ENTRY(PluginHost::IWeb)
+            INTERFACE_ENTRY(PluginHost::IDispatcher)
         END_INTERFACE_MAP
 
     public:
@@ -503,34 +635,28 @@ namespace Plugin {
         virtual void Inbound(Web::Request& request) override;
         virtual Core::ProxyType<Web::Response> Process(const Web::Request& request) override;
 
-        //   IIPNetwork methods
-        // -------------------------------------------------------------------------------------------------------
-        virtual uint32_t AddAddress(const string& interfaceName) override;
-        virtual uint32_t AddAddress(const string& interfaceName, const string& IPAddress, const string& gateway, const string& broadcast, const uint8_t netmask) override;
-        virtual uint32_t RemoveAddress(const string& interfaceName, const string& IPAddress, const string& gateway, const string& broadcast) override;
-        virtual uint32_t AddDNS(IIPNetwork::IDNSServers* dnsEntries) override;
-        virtual uint32_t RemoveDNS(IIPNetwork::IDNSServers* dnsEntries) override;
-
     private:
+        void Save(const string& filename);
+        bool Load(const string& filename, std::map<const string, const Entry>& info);
+
         uint32_t Reload(const string& interfaceName, const bool dynamic);
         uint32_t SetIP(Core::AdapterIterator& adapter, const Core::IPNode& ipAddress, const Core::NodeId& gateway, const Core::NodeId& broadcast, bool clearOld = false);
-        bool NewOffer(const string& interfaceName, const DHCPClientImplementation::Offer& offer);
-        void RequestAccepted(const string& interfaceName, const DHCPClientImplementation::Offer& offer);
-        void RequestFailed(const string& interfaceName, const DHCPClientImplementation::Offer& offer);
-        void NoOffers(const string& interfaceName);
+
+        void DNS(std::list<Core::NodeId>& servers) const;
+        uint32_t DNS(Core::JSON::ArrayType<Core::JSON::String>& dns) const;
+        uint32_t DNS(const Core::JSON::ArrayType<Core::JSON::String>& dns);
+
+        uint32_t NetworkInfo(const JsonData::NetworkControl::NetworkData& network);
+        uint32_t NetworkInfo(std::map<const string, DHCPEngine>::const_iterator& engine, Core::JSON::ArrayType<JsonData::NetworkControl::NetworkData>& networkData) const;
+        uint32_t NetworkInfo(const string& index, Core::JSON::ArrayType<JsonData::NetworkControl::NetworkData>& networkData) const;
+        uint32_t NetworkInfo(const string& index, const Core::JSON::ArrayType<JsonData::NetworkControl::NetworkData>& networkData);
+        void ClearIP(Core::AdapterIterator& adapter);
+
+        void Accepted(const string& interfaceName, const DHCPClient::Offer& offer);
+        void Failed(const string& interfaceName);
         void RefreshDNS();
         void Activity(const string& interface);
-        uint16_t DeleteSection(Core::DataElementFile& file, const string& startMarker, const string& endMarker);
-        inline uint8_t ResponseTime() const
-        {
-            return (_responseTime);
-        }
-        inline uint8_t Retries() const
-        {
-            return (_retries);
-        }
-        void ClearAssignedIPV4IPs(Core::AdapterIterator& adapter);
-        void ClearAssignedIPV6IPs(Core::AdapterIterator& adapter);
+        void SubSystemValidation();
 
         void RegisterAll();
         void UnregisterAll();
@@ -539,22 +665,26 @@ namespace Plugin {
         uint32_t endpoint_assign(const JsonData::NetworkControl::ReloadParamsInfo& params);
         uint32_t endpoint_flush(const JsonData::NetworkControl::ReloadParamsInfo& params);
         uint32_t get_network(const string& index, Core::JSON::ArrayType<JsonData::NetworkControl::NetworkData>& response) const;
+        uint32_t set_network(const string& index, const Core::JSON::ArrayType<JsonData::NetworkControl::NetworkData>& param);
+        uint32_t get_dns(Core::JSON::ArrayType<Core::JSON::String>& response) const;
+        uint32_t set_dns(const Core::JSON::ArrayType<Core::JSON::String>& param);
         uint32_t get_up(const string& index, Core::JSON::Boolean& response) const;
         uint32_t set_up(const string& index, const Core::JSON::Boolean& param);
         void event_connectionchange(const string& name, const string& address, const JsonData::NetworkControl::ConnectionchangeParamsData::StatusType& status);
 
     private:
-        Core::CriticalSection _adminLock;
+        mutable Core::CriticalSection _adminLock;
         uint16_t _skipURL;
         PluginHost::IShell* _service;
-        uint8_t _responseTime;
-        uint8_t _retries;
         string _dnsFile;
         string _persistentStoragePath;
-        std::list<std::pair<uint16_t, Core::NodeId>> _dns;
-        std::map<const string, StaticInfo> _interfaces;
-        std::map<const string, Core::ProxyType<DHCPEngine>> _dhcpInterfaces;
-        Core::ProxyType<AdapterObserver> _observer;
+        uint8_t _responseTime;
+        uint8_t _retries;
+        std::list<Core::NodeId> _dns;
+        std::list<string> _requiredSet;
+        std::map<const string, DHCPEngine> _dhcpInterfaces;
+        AdapterObserver _observer;
+        bool _open;
     };
 
 } // namespace Plugin

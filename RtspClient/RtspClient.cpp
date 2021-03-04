@@ -52,7 +52,7 @@ namespace Plugin {
             _service = nullptr;
         } else {
             _implementation->Configure(_service);
-            TRACE_L1("RtspClient Plugin initialized %p", _implementation);
+            TRACE(Trace::Information, (_T("RtspClient Plugin initialized %p"), _implementation));
         }
 
         return message;
@@ -64,18 +64,14 @@ namespace Plugin {
         ASSERT(_implementation != nullptr);
 
         _service->Unregister(&_notification);
+        
+        _implementation->Release(); 
 
-        if (_implementation->Release() != Core::ERROR_DESTRUCTION_SUCCEEDED) {
-
-            ASSERT(_connectionId != 0);
-
-            TRACE_L1("RtspClient Plugin is not properly destructed. %d", _connectionId);
-
+        if(_connectionId != 0){
             RPC::IRemoteConnection* connection(_service->RemoteConnection(_connectionId));
 
             // The process can disappear in the meantime...
             if (connection != nullptr) {
-
                 // But if it did not dissapear in the meantime, forcefully terminate it. Shoot to kill :-)
                 connection->Terminate();
                 connection->Release();

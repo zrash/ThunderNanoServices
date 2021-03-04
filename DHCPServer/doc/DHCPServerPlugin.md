@@ -21,12 +21,12 @@ DHCPServer plugin for Thunder framework.
 <a name="head.Scope"></a>
 ## Scope
 
-This document describes purpose and functionality of the DHCPServer plugin. It includes detailed specification of its configuration, methods and properties provided.
+This document describes purpose and functionality of the DHCPServer plugin. It includes detailed specification about its configuration, methods and properties provided.
 
 <a name="head.Case_Sensitivity"></a>
 ## Case Sensitivity
 
-All identifiers on the interface described in this document are case-sensitive. Thus, unless stated otherwise, all keywords, entities, properties, relations and actions should be treated as such.
+All identifiers of the interfaces described in this document are case-sensitive. Thus, unless stated otherwise, all keywords, entities, properties, relations and actions should be treated as such.
 
 <a name="head.Acronyms,_Abbreviations_and_Terms"></a>
 ## Acronyms, Abbreviations and Terms
@@ -68,7 +68,7 @@ The table below lists configuration options of the plugin.
 | callsign | string | Plugin instance name (default: *DHCPServer*) |
 | classname | string | Class name: *DHCPServer* |
 | locator | string | Library name: *libWPEFrameworkDHCPServer.so* |
-| autostart | boolean | Determines if the plugin is to be started automatically along with the framework |
+| autostart | boolean | Determines if the plugin shall be started automatically along with the framework |
 | configuration | object | Server configuration |
 | configuration.name | string | Name of the server |
 | configuration.servers | array | List of configured DHCP servers |
@@ -76,6 +76,7 @@ The table below lists configuration options of the plugin.
 | configuration.servers[#].interface | string | Name of the network interface to bind to |
 | configuration.servers[#].poolstart | number | IP pool start number |
 | configuration.servers[#].poolsize | number | IP pool size (in IP numbers) |
+| configuration.servers[#]?.router | number | <sup>*(optional)*</sup> IP of router |
 
 <a name="head.Methods"></a>
 # Methods
@@ -88,6 +89,7 @@ DHCPServer interface methods:
 | :-------- | :-------- |
 | [activate](#method.activate) | Activates a DHCP server |
 | [deactivate](#method.deactivate) | Deactivates a DHCP server |
+
 
 <a name="method.activate"></a>
 ## *activate <sup>method</sup>*
@@ -129,6 +131,7 @@ Activates a DHCP server.
     }
 }
 ```
+
 #### Response
 
 ```json
@@ -138,6 +141,7 @@ Activates a DHCP server.
     "result": null
 }
 ```
+
 <a name="method.deactivate"></a>
 ## *deactivate <sup>method</sup>*
 
@@ -178,6 +182,7 @@ Deactivates a DHCP server.
     }
 }
 ```
+
 #### Response
 
 ```json
@@ -187,6 +192,7 @@ Deactivates a DHCP server.
     "result": null
 }
 ```
+
 <a name="head.Properties"></a>
 # Properties
 
@@ -197,6 +203,7 @@ DHCPServer interface properties:
 | Property | Description |
 | :-------- | :-------- |
 | [status](#property.status) <sup>RO</sup> | Server status |
+
 
 <a name="property.status"></a>
 ## *status <sup>property</sup>*
@@ -241,6 +248,7 @@ Provides access to the server status.
     "method": "DHCPServer.1.status@eth0"
 }
 ```
+
 #### Get Response
 
 ```json
@@ -265,3 +273,4 @@ Provides access to the server status.
     ]
 }
 ```
+

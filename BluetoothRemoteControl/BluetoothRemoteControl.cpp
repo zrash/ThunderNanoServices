@@ -49,7 +49,7 @@ namespace Plugin {
         LUT<FROM,TO>& operator= (const LUT<FROM,TO>&) = delete;
 
         template<size_t N>
-        LUT(const Entry (&input)[N]) : _lut() { 
+        LUT(const Entry (&input)[N]) : _lut() {
             for (uint8_t index = 0; index < N; index++) {
                 _lut.emplace_back(input[index]);
             }
@@ -129,14 +129,14 @@ namespace Plugin {
         if (Core::File(_service->PersistentPath(), true).IsDirectory() == false) {
             if (Core::Directory(_service->PersistentPath().c_str()).CreatePath() == false) {
                 TRACE(Trace::Error, (_T("Failed to create persistent storage folder [%s]"), _service->PersistentPath().c_str()));
-            } 
+            }
         }
         else {
             Exchange::IBluetooth* bluetoothCtl(_service->QueryInterfaceByCallsign<Exchange::IBluetooth>(_controller));
 
             if (bluetoothCtl != nullptr) {
                 Core::Directory storageDir (_service->PersistentPath().c_str(), _T("*.json"));
- 
+
                 while ( (_gattRemote == nullptr) && (storageDir.Next() == true) ) {
                     string filename = Core::File::FileName(storageDir.Name());
 
@@ -149,7 +149,7 @@ namespace Plugin {
 
                         if (device != nullptr) {
                             if (fileData.Open(true) == true) {
-                                GATTRemote::Data data; 
+                                GATTRemote::Data data;
                                 data.IElement::FromFile(fileData);
 
                                 // Seems we have a "real" device, load it..
@@ -179,7 +179,7 @@ namespace Plugin {
         if (_recorder.IsOpen() == true) {
             _recorder.Close();
         }
-        
+
         if (_gattRemote != nullptr) {
             delete _gattRemote;
             _gattRemote = nullptr;
@@ -242,6 +242,31 @@ namespace Plugin {
         response->Message = _T("Unsupported PUT request");
 
         // Nothing here yet
+        if ((_gattRemote != nullptr) && (index.IsValid() == true)) {
+            if ((index.Current() == _T("Voice")) && (index.Next() != false)) {
+                if (index.Current() == _T("Off")) {
+                    uint32_t result = _gattRemote->VoiceOutput(false);
+                    if (result == Core::ERROR_NONE) {
+                        response->ErrorCode = Web::STATUS_OK;
+                        response->Message = _T("Voice disabled.");
+                    }
+                    else {
+                        response->ErrorCode = Web::STATUS_UNPROCESSABLE_ENTITY;
+                        response->Message = _T("Voice could not be disabled. Error: ") + Core::NumberType<uint32_t>(result).Text();
+                    }
+                } else if (index.Current() == _T("On")) {
+                    uint32_t result = _gattRemote->VoiceOutput(true);
+                    if (result == Core::ERROR_NONE) {
+                        response->ErrorCode = Web::STATUS_OK;
+                        response->Message = _T("Voice enabled.");
+                    }
+                    else {
+                        response->ErrorCode = Web::STATUS_UNPROCESSABLE_ENTITY;
+                        response->Message = _T("Voice could not be enabled. Error: ") + Core::NumberType<uint32_t>(result).Text();
+                    }
+                }
+            }
+        }
 
         return (response);
     }
@@ -368,6 +393,8 @@ namespace Plugin {
             settingsFile.Close();
         }
 
+       _gattRemote->Decoder(_configLine); 
+
         if (_inputHandler != nullptr) {
             // Load the keyMap for this remote
             string keyMapFile(_service->DataPath() + (_keyMap.empty() ? _name : _keyMap) + _T(".json"));
@@ -410,7 +437,7 @@ namespace Plugin {
             }
 
             if (_record != recorder::OFF) {
-               
+
                 WAV::Recorder::codec wavCodec;
                 TCHAR fileName[256];
                 Core::Time now (Core::Time::Now());
@@ -470,10 +497,10 @@ namespace Plugin {
         }
     }
 
-    void BluetoothRemoteControl::KeyEvent(const bool pressed, const uint16_t keyCode)
+    void BluetoothRemoteControl::KeyEvent(const bool pressed, const uint32_t keyCode)
     {
         _adminLock.Lock();
-        if (_inputHandler != nullptr) {            
+        if (_inputHandler != nullptr) {
             uint32_t result = _inputHandler->KeyEvent(pressed, keyCode, _name);
             if (result == Core::ERROR_NONE) {
                 TRACE(Trace::Information, ("key send: %d (%s)", keyCode, pressed ? "pressed": "released"));

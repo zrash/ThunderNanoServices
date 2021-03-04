@@ -22,12 +22,12 @@ Compositor plugin for Thunder framework.
 <a name="head.Scope"></a>
 ## Scope
 
-This document describes purpose and functionality of the Compositor plugin. It includes detailed specification of its configuration, methods and properties provided.
+This document describes purpose and functionality of the Compositor plugin. It includes detailed specification about its configuration, methods and properties provided.
 
 <a name="head.Case_Sensitivity"></a>
 ## Case Sensitivity
 
-All identifiers on the interface described in this document are case-sensitive. Thus, unless stated otherwise, all keywords, entities, properties, relations and actions should be treated as such.
+All identifiers of the interfaces described in this document are case-sensitive. Thus, unless stated otherwise, all keywords, entities, properties, relations and actions should be treated as such.
 
 <a name="head.Acronyms,_Abbreviations_and_Terms"></a>
 ## Acronyms, Abbreviations and Terms
@@ -60,7 +60,7 @@ The table below provides and overview of terms and abbreviations used in this do
 <a name="head.Description"></a>
 # Description
 
-Compositor gives you controll over what is displayed on screen.
+Compositor gives you control over what is displayed on screen.
 
 The plugin is designed to be loaded and executed within the Thunder framework. For more information about the framework refer to [[Thunder](#ref.Thunder)].
 
@@ -74,7 +74,19 @@ The table below lists configuration options of the plugin.
 | callsign | string | Plugin instance name (default: *Compositor*) |
 | classname | string | Class name: *Compositor* |
 | locator | string | Library name: *libWPEFrameworkCompositor.so* |
-| autostart | boolean | Determines if the plugin is to be started automatically along with the framework |
+| autostart | boolean | Determines if the plugin shall be started automatically along with the framework |
+| configuration | object | <sup>*(optional)*</sup>  |
+| configuration?.hardwareready | number | <sup>*(optional)*</sup> Hardware delay (Nexus) |
+| configuration?.resolution | string | <sup>*(optional)*</sup> Screen resolution (Nexus) |
+| configuration?.allowedclients | array | <sup>*(optional)*</sup> List of allowed clients (Nexus) |
+| configuration?.allowedclients[#] | string | <sup>*(optional)*</sup>  |
+| configuration?.connector | enum | <sup>*(optional)*</sup> Resolution (Wayland) |
+| configuration?.join | boolean | <sup>*(optional)*</sup> Enable join (Wayland) |
+| configuration?.display | string | <sup>*(optional)*</sup> Display (Westeros) |
+| configuration?.renderer | string | <sup>*(optional)*</sup> Path of renderer (Westeros) |
+| configuration?.glname | string | <sup>*(optional)*</sup> Name of GL-library (Westeros) |
+| configuration?.width | string | <sup>*(optional)*</sup> Screen width (Westeros) |
+| configuration?.height | string | <sup>*(optional)*</sup> Screen height (Westeros) |
 
 <a name="head.Methods"></a>
 # Methods
@@ -87,7 +99,8 @@ Compositor interface methods:
 | :-------- | :-------- |
 | [putontop](#method.putontop) | Puts client surface on top in z-order |
 | [putbelow](#method.putbelow) | Puts client surface below another surface |
-| [kill](#method.kill) | Kills a client |
+| [select](#method.select) | Directs the input to the given client, disabling all the others |
+
 
 <a name="method.putontop"></a>
 ## *putontop <sup>method</sup>*
@@ -115,7 +128,7 @@ Use this method to get a client's surface to the top position.
 
 | Code | Message | Description |
 | :-------- | :-------- | :-------- |
-| 34 | ```ERROR_FIRST_RESOURCE_NOT_FOUND``` | Client not found |
+| 2 | ```ERROR_UNAVAILABLE``` | Client not found |
 
 ### Example
 
@@ -131,6 +144,7 @@ Use this method to get a client's surface to the top position.
     }
 }
 ```
+
 #### Response
 
 ```json
@@ -140,6 +154,7 @@ Use this method to get a client's surface to the top position.
     "result": null
 }
 ```
+
 <a name="method.putbelow"></a>
 ## *putbelow <sup>method</sup>*
 
@@ -167,7 +182,7 @@ Use this method to reorder client surfaces in the z-order list.
 
 | Code | Message | Description |
 | :-------- | :-------- | :-------- |
-| 34 | ```ERROR_FIRST_RESOURCE_NOT_FOUND``` | Client(s) not found |
+| 2 | ```ERROR_UNAVAILABLE``` | Client(s) not found |
 
 ### Example
 
@@ -184,6 +199,7 @@ Use this method to reorder client surfaces in the z-order list.
     }
 }
 ```
+
 #### Response
 
 ```json
@@ -193,14 +209,15 @@ Use this method to reorder client surfaces in the z-order list.
     "result": null
 }
 ```
-<a name="method.kill"></a>
-## *kill <sup>method</sup>*
 
-Kills a client.
+<a name="method.select"></a>
+## *select <sup>method</sup>*
+
+Directs the input to the given client, disabling all the others.
 
 ### Description
 
-Use this method to kill a client. Whenever a client is killed, the execution of the client is stopped and all its resources are released.
+Use this method to direct all inputs to this client. The client that is receiving the inputs prior to this call will nolonger receive it anymore after this call.
 
 ### Parameters
 
@@ -219,7 +236,7 @@ Use this method to kill a client. Whenever a client is killed, the execution of 
 
 | Code | Message | Description |
 | :-------- | :-------- | :-------- |
-| 34 | ```ERROR_FIRST_RESOURCE_NOT_FOUND``` | Client not found |
+| 2 | ```ERROR_UNAVAILABLE``` | Client not found |
 
 ### Example
 
@@ -229,12 +246,13 @@ Use this method to kill a client. Whenever a client is killed, the execution of 
 {
     "jsonrpc": "2.0",
     "id": 1234567890,
-    "method": "Compositor.1.kill",
+    "method": "Compositor.1.select",
     "params": {
         "client": "Netflix"
     }
 }
 ```
+
 #### Response
 
 ```json
@@ -244,6 +262,7 @@ Use this method to kill a client. Whenever a client is killed, the execution of 
     "result": null
 }
 ```
+
 <a name="head.Properties"></a>
 # Properties
 
@@ -254,11 +273,11 @@ Compositor interface properties:
 | Property | Description |
 | :-------- | :-------- |
 | [resolution](#property.resolution) | Screen resolution |
-| [clients](#property.clients) <sup>RO</sup> | List of compositor clients |
 | [zorder](#property.zorder) <sup>RO</sup> | List of compositor clients sorted by z-order |
 | [geometry](#property.geometry) | Client surface geometry |
 | [visiblity](#property.visiblity) <sup>WO</sup> | Client surface visibility |
 | [opacity](#property.opacity) <sup>WO</sup> | Client surface opacity |
+
 
 <a name="property.resolution"></a>
 ## *resolution <sup>property</sup>*
@@ -280,6 +299,7 @@ Use this property to set or retrieve the current resolution of the screen.
 | Code | Message | Description |
 | :-------- | :-------- | :-------- |
 | 22 | ```ERROR_UNKNOWN_KEY``` | Unknown resolution |
+| 2 | ```ERROR_UNAVAILABLE``` | Set resolution is not supported or failed |
 | 1 | ```ERROR_GENERAL``` | Failed to set resolution |
 
 ### Example
@@ -293,6 +313,7 @@ Use this property to set or retrieve the current resolution of the screen.
     "method": "Compositor.1.resolution"
 }
 ```
+
 #### Get Response
 
 ```json
@@ -302,6 +323,7 @@ Use this property to set or retrieve the current resolution of the screen.
     "result": "1080p24"
 }
 ```
+
 #### Set Request
 
 ```json
@@ -312,6 +334,7 @@ Use this property to set or retrieve the current resolution of the screen.
     "params": "1080p24"
 }
 ```
+
 #### Set Response
 
 ```json
@@ -321,46 +344,7 @@ Use this property to set or retrieve the current resolution of the screen.
     "result": "null"
 }
 ```
-<a name="property.clients"></a>
-## *clients <sup>property</sup>*
 
-Provides access to the list of compositor clients.
-
-> This property is **read-only**.
-
-### Description
-
-Use this property to retrieve the information of actual running clients.
-
-### Value
-
-| Name | Type | Description |
-| :-------- | :-------- | :-------- |
-| (property) | array | List of compositor clients |
-| (property)[#] | string | Client name |
-
-### Example
-
-#### Get Request
-
-```json
-{
-    "jsonrpc": "2.0",
-    "id": 1234567890,
-    "method": "Compositor.1.clients"
-}
-```
-#### Get Response
-
-```json
-{
-    "jsonrpc": "2.0",
-    "id": 1234567890,
-    "result": [
-        "Netflix"
-    ]
-}
-```
 <a name="property.zorder"></a>
 ## *zorder <sup>property</sup>*
 
@@ -396,6 +380,7 @@ Use this property to retrieve the list of all clients in z-order. Each client ha
     "method": "Compositor.1.zorder"
 }
 ```
+
 #### Get Response
 
 ```json
@@ -407,6 +392,7 @@ Use this property to retrieve the list of all clients in z-order. Each client ha
     ]
 }
 ```
+
 <a name="property.geometry"></a>
 ## *geometry <sup>property</sup>*
 
@@ -432,7 +418,7 @@ Use this property to update or retrieve the geometry of a client's surface.
 
 | Code | Message | Description |
 | :-------- | :-------- | :-------- |
-| 34 | ```ERROR_FIRST_RESOURCE_NOT_FOUND``` | Client not found |
+| 2 | ```ERROR_UNAVAILABLE``` | Client not found |
 
 ### Example
 
@@ -445,6 +431,7 @@ Use this property to update or retrieve the geometry of a client's surface.
     "method": "Compositor.1.geometry@Netflix"
 }
 ```
+
 #### Get Response
 
 ```json
@@ -459,6 +446,7 @@ Use this property to update or retrieve the geometry of a client's surface.
     }
 }
 ```
+
 #### Set Request
 
 ```json
@@ -474,6 +462,7 @@ Use this property to update or retrieve the geometry of a client's surface.
     }
 }
 ```
+
 #### Set Response
 
 ```json
@@ -483,6 +472,7 @@ Use this property to update or retrieve the geometry of a client's surface.
     "result": "null"
 }
 ```
+
 <a name="property.visiblity"></a>
 ## *visiblity <sup>property</sup>*
 
@@ -506,7 +496,7 @@ Use this property to set the client's surface visibility.
 
 | Code | Message | Description |
 | :-------- | :-------- | :-------- |
-| 34 | ```ERROR_FIRST_RESOURCE_NOT_FOUND``` | Client not found |
+| 2 | ```ERROR_UNAVAILABLE``` | Client not found |
 
 ### Example
 
@@ -520,6 +510,7 @@ Use this property to set the client's surface visibility.
     "params": "visible"
 }
 ```
+
 #### Set Response
 
 ```json
@@ -529,6 +520,7 @@ Use this property to set the client's surface visibility.
     "result": "null"
 }
 ```
+
 <a name="property.opacity"></a>
 ## *opacity <sup>property</sup>*
 
@@ -552,7 +544,7 @@ Use this property to set the client's surface opacity level.
 
 | Code | Message | Description |
 | :-------- | :-------- | :-------- |
-| 34 | ```ERROR_FIRST_RESOURCE_NOT_FOUND``` | Client not found |
+| 2 | ```ERROR_UNAVAILABLE``` | Client not found |
 
 ### Example
 
@@ -566,6 +558,7 @@ Use this property to set the client's surface opacity level.
     "params": 127
 }
 ```
+
 #### Set Response
 
 ```json
@@ -575,3 +568,4 @@ Use this property to set the client's surface opacity level.
     "result": "null"
 }
 ```
+
