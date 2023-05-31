@@ -15,12 +15,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+find_package(WPEFramework REQUIRED)
 find_package(${NAMESPACE}COM REQUIRED)
 find_package(CompileSettingsDebug CONFIG REQUIRED)
 
 add_executable(SimpleCOMRPCServer SimpleCOMRPCServer.cpp)
 
-set_target_properties(COMRPCClient PROPERTIES
+set_target_properties(SimpleCOMRPCServer PROPERTIES
         CXX_STANDARD 11
         CXX_STANDARD_REQUIRED YES
         )     

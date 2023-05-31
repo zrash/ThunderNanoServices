@@ -92,6 +92,7 @@ bool ParseOptions(int argc, char** argv, Core::NodeId& comChannel, ServerType& t
 {
     int index = 1;
     bool showHelp = false;
+    type = ServerType::STANDALONE_SERVER;
     comChannel = Core::NodeId(Exchange::SimpleTestAddress);
 
     while ((index < argc) && (!showHelp)) {
@@ -146,6 +147,7 @@ int main(int argc, char* argv[])
         int element;
         Exchange::IWallClock* clock(nullptr);
         Sink* sink = nullptr; 
+
         Core::ProxyType<RPC::CommunicatorClient> client(Core::ProxyType<RPC::CommunicatorClient>::Create(comChannel));
         Math* outbound = Core::Service<Math>::Create<Math>();
         printf("Channel: %s:[%d]\n\n", comChannel.HostAddress().c_str(), comChannel.PortNumber());
@@ -185,6 +187,29 @@ int main(int argc, char* argv[])
                     }
                     else {
                         printf("Our revoke has not been accepted, Error: %d!\n", result);
+                    }
+                }
+                break;
+            case 'K':
+                {
+                    Exchange::IKaruna* kk(nullptr);
+                    if (client->IsOpen() == false) {
+                        client->Open(2000);
+                    }
+                    if (client->IsOpen() == false) {
+                        printf("Could not open a connection to the server. No exchange of interfaces happened!\n");
+                        break;
+                    } else {
+                        kk = client->Aquire<Exchange::IKaruna>(3000, _T("KarunaTestClass"), ~0);
+                        if (kk)
+                        {
+                            string reply;
+                            kk->Greet("this is from client", reply);
+                            printf("reply is %s\n", reply.c_str());
+                            kk->Release();
+                        }
+                        else
+                            printf ("Failed..\n");
                     }
                 }
                 break;

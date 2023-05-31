@@ -32,7 +32,16 @@ namespace Exchange {
     enum example_ids {
         ID_WALLCLOCK = 0x80001000,
         ID_WALLCLOCK_CALLBACK = 0x80001001,
-        ID_MATH = 0x80001002
+        ID_MATH = 0x80001002,
+        ID_KARUNA = 0x80001003
+    };
+
+    struct IKaruna : virtual public Core::IUnknown {
+        enum { ID = ID_KARUNA};
+	    virtual uint32_t Greet(const string& message, string& result /* @out */) = 0;
+
+
+        ~IKaruna() override = default;
     };
 
     struct IWallClock : virtual public Core::IUnknown {

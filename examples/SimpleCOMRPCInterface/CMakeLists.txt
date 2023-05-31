@@ -14,11 +14,12 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+find_package(WPEFramework REQUIRED)
 find_package(${NAMESPACE}Core)
 find_package(${NAMESPACE}COM)
 find_package(CompileSettingsDebug CONFIG REQUIRED)
 
-set(ProxyStubGenerator_DIR "/home/lukasz/Desktop/builds/rpi3b+_vc4/build1/buildroot/output/build/wpeframework-custom/Tools/cmake" ${ProxyStubGenerator_DIR})
+set(ProxyStubGenerator_DIR "/home/karunakaran/workspace/thunder/install/tools/cmake" ${ProxyStubGenerator_DIR})
 find_package(ProxyStubGenerator REQUIRED)
 
 
@@ -39,6 +40,8 @@ add_library(${TARGET} SHARED
         ${PROXY_STUB_SOURCES}        
         Module.cpp
         )
+
+target_include_directories( ${TARGET} PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>)
 
 target_link_libraries(${TARGET}
         PRIVATE

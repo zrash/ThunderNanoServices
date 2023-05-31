@@ -29,6 +29,29 @@ using namespace WPEFramework;
 
 class COMServer : public RPC::Communicator {
 private:
+    class TestClass : public Exchange::IKaruna {
+        public:
+            TestClass() {
+                printf("Created..\n");
+            }
+
+            uint32_t Greet(const string& message, string& result /* @out */)
+            {
+                printf ("Hello :%s\n", message.c_str());
+                result = "Here is Server response";
+                return 0;
+            }
+
+        TestClass(const TestClass&) = delete;
+        TestClass& operator= (const TestClass&) = delete;
+        ~TestClass() override = default;
+
+        BEGIN_INTERFACE_MAP(TestClass)
+            INTERFACE_ENTRY(Exchange::IKaruna)
+        END_INTERFACE_MAP
+        };
+
+
     class Implementation : public Exchange::IWallClock {
     private:
         class WallClockNotifier : public Core::Thread {
@@ -247,6 +270,9 @@ private:
     {
         void* result = nullptr;
 
+
+        printf ("##### %s ##### %d ### %d ####\n", className.c_str(), interfaceId, versionId);
+
         // Currently we only support version 1 of the IRPCLink :-)
         if ((versionId == 1) || (versionId == static_cast<uint32_t>(~0))) {
             
@@ -254,6 +280,11 @@ private:
 
                 // Allright, request a new object that implements the requested interface.
                 result = Core::Service<Implementation>::Create<Exchange::IWallClock>();
+            }
+            else if (interfaceId == ::Exchange::IKaruna::ID) {
+
+                // Allright, request a new object that implements the requested interface.
+                result = Core::Service<TestClass>::Create<Exchange::IKaruna>();
             }
             else if (interfaceId == Core::IUnknown::ID) {
 
